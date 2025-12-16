@@ -1,0 +1,14 @@
+version: 1
+conversationId: c7d2816b-59c6-4c92-a894-5c08f8b66b26
+title: New conversation
+model: claude-4.5-opus-high
+mode: agent
+updatedAt: 1765869278569
+tldr: The conversation began with a simple greeting from the user, and the
+  assistant offered help with a messenger project. No specific tasks or requests
+  were made.
+overview: This conversation is at its very beginning. The user initiated with a
+  simple greeting, and the assistant responded by offering assistance for a
+  "messenger project". No specific intent or task has been communicated or
+  addressed yet.
+bullets: []
