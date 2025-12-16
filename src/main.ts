@@ -1,7 +1,14 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, session, shell, ipcMain, webContents } from 'electron';
 import * as path from 'path';
 
-const MESSENGER_URL = 'https://www.messenger.com';
+function isExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return !parsed.hostname.endsWith('messenger.com') && !parsed.hostname.endsWith('facebook.com');
+  } catch {
+    return false;
+  }
+}
 
 function createWindow(): void {
   const partition = 'persist:messenger';
@@ -37,10 +44,26 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() === 'webview') {
+      contents.setWindowOpenHandler(({ url }) => {
+        if (isExternalUrl(url)) {
+          shell.openExternal(url);
+          return { action: 'deny' };
+        }
+        return { action: 'allow' };
+      });
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+ipcMain.handle('open-external', (_event, url: string) => {
+  shell.openExternal(url);
 });
