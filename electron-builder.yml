@@ -1,0 +1,15 @@
+appId: com.own-messenger.app
+productName: Messenger
+directories:
+  output: release
+files:
+  - dist/**/*
+  - src/renderer/**/*
+mac:
+  category: public.app-category.social-networking
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
