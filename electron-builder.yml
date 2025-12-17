@@ -7,7 +7,7 @@ files:
   - src/renderer/**/*
 mac:
   category: public.app-category.social-networking
-  icon: build/icon.png
+  icon: logo.png
   target:
     - target: dmg
       arch:
