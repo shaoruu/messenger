@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>Share your screen</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #e4e6eb;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid #3a3b3c;
+      flex-shrink: 0;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .header p {
+      font-size: 14px;
+      color: #b0b3b8;
+    }
+
+    .sources-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 24px;
+    }
+
+    .sources-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .source-item {
+      background: #242526;
+      border: 2px solid transparent;
+      border-radius: 12px;
+      padding: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .source-item:hover {
+      background: #3a3b3c;
+      border-color: #3a3b3c;
+    }
+
+    .source-item:focus {
+      outline: none;
+      border-color: #0084ff;
+    }
+
+    .source-thumbnail {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: #000;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .source-name {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .footer {
+      padding: 16px 24px;
+      border-top: 1px solid #3a3b3c;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .btn {
+      padding: 8px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .btn-cancel {
+      background: #3a3b3c;
+      border: none;
+      color: #e4e6eb;
+    }
+
+    .btn-cancel:hover {
+      background: #4e4f50;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Share your screen</h1>
+    <p>Choose what you'd like to share</p>
+  </div>
+  <div class="sources-container">
+    <div class="sources-grid" id="sources-grid"></div>
+  </div>
+  <div class="footer">
+    <button class="btn btn-cancel" id="cancel-btn">Cancel</button>
+  </div>
+  <script src="../../dist/picker/picker.js"></script>
+</body>
+</html>
