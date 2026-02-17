@@ -62,8 +62,14 @@ function createWindow(): void {
 
   mainWindow.webContents.on('did-attach-webview', (_, webContents) => {
     webContents.setWindowOpenHandler(({ url }) => {
-      const isMessengerURL = !url || url === 'about:blank' || url.startsWith('https://www.messenger.com') || url.startsWith('https://messenger.com');
-      if (isMessengerURL) {
+      const isFacebookURL =
+        !url ||
+        url === 'about:blank' ||
+        url.startsWith('https://www.facebook.com') ||
+        url.startsWith('https://facebook.com') ||
+        url.startsWith('https://www.messenger.com') ||
+        url.startsWith('https://messenger.com');
+      if (isFacebookURL) {
         return { action: 'allow' };
       }
       shell.openExternal(url);

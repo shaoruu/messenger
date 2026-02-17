@@ -12,10 +12,15 @@ const backBtn = document.getElementById('back') as HTMLButtonElement;
 const forwardBtn = document.getElementById('forward') as HTMLButtonElement;
 const refreshBtn = document.getElementById('refresh') as HTMLButtonElement;
 
-function isMessengerURL(url: string): boolean {
+function isFacebookURL(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.hostname === 'www.messenger.com' || parsed.hostname === 'messenger.com';
+    return (
+      parsed.hostname === 'www.facebook.com' ||
+      parsed.hostname === 'facebook.com' ||
+      parsed.hostname === 'www.messenger.com' ||
+      parsed.hostname === 'messenger.com'
+    );
   } catch {
     return false;
   }
@@ -59,14 +64,14 @@ webview.addEventListener('context-menu', (e) => {
 webview.addEventListener('new-window', (e) => {
   const event = e as Electron.DidCreateWindowDetails & Event & { url: string };
   e.preventDefault();
-  if (event.url && !isMessengerURL(event.url)) {
+  if (event.url && !isFacebookURL(event.url)) {
     api.openExternal(event.url);
   }
 });
 
 webview.addEventListener('will-navigate', (e) => {
   const event = e as Electron.WillNavigateEvent;
-  if (event.url && !isMessengerURL(event.url)) {
+  if (event.url && !isFacebookURL(event.url)) {
     e.preventDefault();
     api.openExternal(event.url);
   }
