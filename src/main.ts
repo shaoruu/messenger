@@ -3,6 +3,7 @@ import * as path from 'path';
 
 type DisplayMediaCallback = (streams: { video?: Electron.Video }) => void;
 let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
+let messengerSession: Electron.Session | null = null;
 
 function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
   const pickerWindow = new BrowserWindow({
@@ -37,9 +38,9 @@ function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.Desktop
 
 function createWindow(): void {
   const partition = 'persist:messenger';
-  const ses = session.fromPartition(partition);
+  messengerSession = session.fromPartition(partition);
 
-  ses.setUserAgent(
+  messengerSession.setUserAgent(
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   );
 
@@ -98,6 +99,15 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', async (e) => {
+  if (messengerSession) {
+    e.preventDefault();
+    await messengerSession.cookies.flushStore();
+    messengerSession = null;
+    app.quit();
+  }
 });
 
 app.on('window-all-closed', () => {
