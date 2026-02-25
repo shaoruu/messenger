@@ -104,9 +104,12 @@ app.whenReady().then(() => {
 app.on('before-quit', async (e) => {
   if (messengerSession) {
     e.preventDefault();
-    await messengerSession.cookies.flushStore();
-    messengerSession = null;
-    app.quit();
+    try {
+      await messengerSession.cookies.flushStore();
+    } finally {
+      messengerSession = null;
+      app.quit();
+    }
   }
 });
 
