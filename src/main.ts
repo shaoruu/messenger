@@ -6,6 +6,7 @@ let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
 
 // Store messenger session at module level to persist across app lifecycle
 let messengerSession: Electron.Session | null = null;
+let isQuitting = false;
 
 function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
   const pickerWindow = new BrowserWindow({
@@ -113,10 +114,14 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async (event) => {
-  if (messengerSession) {
+  if (messengerSession && !isQuitting) {
     event.preventDefault();
-    await messengerSession.cookies.flushStore();
-    app.exit();
+    isQuitting = true;
+    try {
+      await messengerSession.cookies.flushStore();
+    } finally {
+      app.exit();
+    }
   }
 });
 
