@@ -6,7 +6,8 @@ let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
 
 // Store messenger session at module level to persist across app lifecycle
 let messengerSession: Electron.Session | null = null;
-let isQuitting = false;
+let isFlushing = false;
+let flushComplete = false;
 
 function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
   const pickerWindow = new BrowserWindow({
@@ -114,14 +115,30 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async (event) => {
-  if (messengerSession && !isQuitting) {
-    event.preventDefault();
-    isQuitting = true;
-    try {
-      await messengerSession.cookies.flushStore();
-    } finally {
-      app.exit();
-    }
+  // Once the flush has finished, let any subsequent quit proceed normally.
+  if (!messengerSession || flushComplete) {
+    return;
+  }
+
+  // Always prevent the quit while the flush is pending, including concurrent
+  // quit events fired during the async window.
+  event.preventDefault();
+
+  // Re-entrancy guard: if another before-quit fires while flushing, we still
+  // preventDefault above but skip kicking off a second concurrent flush.
+  if (isFlushing) {
+    return;
+  }
+
+  isFlushing = true;
+  try {
+    await messengerSession.cookies.flushStore();
+  } finally {
+    flushComplete = true;
+    // Re-trigger the quit now that cookies are safely on disk. Because
+    // flushComplete is true, this handler will early-return above and
+    // Electron's normal shutdown sequence will run.
+    app.quit();
   }
 });
 
