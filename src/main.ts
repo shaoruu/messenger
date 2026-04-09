@@ -4,6 +4,9 @@ import * as path from 'path';
 type DisplayMediaCallback = (streams: { video?: Electron.Video }) => void;
 let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
 
+// Store messenger session at module level to persist across app lifecycle
+let messengerSession: Electron.Session | null = null;
+
 function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
   const pickerWindow = new BrowserWindow({
     width: 800,
@@ -37,9 +40,12 @@ function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.Desktop
 
 function createWindow(): void {
   const partition = 'persist:messenger';
-  const ses = session.fromPartition(partition);
+  // Store session reference at module level for cookie persistence
+  if (!messengerSession) {
+    messengerSession = session.fromPartition(partition);
+  }
 
-  ses.setUserAgent(
+  messengerSession.setUserAgent(
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   );
 
@@ -103,6 +109,14 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('before-quit', async (event) => {
+  if (messengerSession) {
+    event.preventDefault();
+    await messengerSession.cookies.flushStore();
+    app.exit();
   }
 });
 
