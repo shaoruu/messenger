@@ -4,6 +4,361 @@ import * as path from 'path';
 type DisplayMediaCallback = (streams: { video?: Electron.Video }) => void;
 let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
 
+let messengerShortcutWebContents: Electron.WebContents | null = null;
+
+type MessengerDomReadyInstaller = {
+  wc: Electron.WebContents;
+  fn: () => void;
+};
+
+let messengerGuestDomReadyCleanup: MessengerDomReadyInstaller | null = null;
+
+function isSearchChatsAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (!(input.meta || input.control)) return false;
+  if (input.alt || input.shift) return false;
+  return input.key.toLowerCase() === 'k';
+}
+
+function isAltChatNavAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (!input.alt || input.control || input.meta || input.shift) return false;
+  return input.key === 'ArrowUp' || input.key === 'ArrowDown';
+}
+
+const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
+  void (function () {
+    var NS = '__ownMessengerInboxSearchHotkey';
+    function hint(el) {
+      var aria = el.getAttribute('aria-label');
+      var ttl = el.getAttribute('title');
+      return ('' + el.placeholder + ' ' + (aria == null ? '' : aria) + ' ' + (ttl == null ? '' : ttl)).toLowerCase();
+    }
+    function passesMessengerLabels(h) {
+      if (h.indexOf('marketplace') !== -1) return false;
+      if (h.indexOf('search messenger') !== -1 || h.indexOf('search messages') !== -1) return true;
+      if (h.indexOf('messenger') !== -1 && h.indexOf('search') !== -1) return true;
+      return false;
+    }
+    function pickMessengerSearchInput(isStrictAboutFacebook) {
+      var inputs = document.querySelectorAll(
+        'input[type="text"], input[type="search"], input[placeholder]:not([type]), input:not([type])'
+      );
+      var i;
+      var el;
+      var h;
+      for (i = 0; i < inputs.length; i++) {
+        el = inputs.item(i);
+        if (!(el instanceof HTMLInputElement)) continue;
+        if (el.disabled || el.type === 'hidden') continue;
+        h = hint(el);
+        if (isStrictAboutFacebook && h.indexOf('search facebook') !== -1) continue;
+        if (passesMessengerLabels(h)) return el;
+      }
+      return null;
+    }
+    function pickMessengerSearchInputAnyStrictness() {
+      return pickMessengerSearchInput(true) || pickMessengerSearchInput(false);
+    }
+    function selectInput(el) {
+      el.focus({ preventScroll: true });
+      if (typeof el.select === 'function') el.select();
+    }
+    function isMessengerSearchInput(el) {
+      if (!(el instanceof HTMLInputElement)) return false;
+      return passesMessengerLabels(hint(el));
+    }
+    function rectRight(el) {
+      return el.getBoundingClientRect().right;
+    }
+    function looksLikeLeftPaneInteractive(el) {
+      if (!(el instanceof Element)) return false;
+      var innerWidth = window.innerWidth;
+      var r = el.getBoundingClientRect();
+      return r.left < innerWidth * 0.55 && r.width > 0 && r.right < innerWidth * 0.6;
+    }
+    function looksLikeSearchPickEnterTarget(targetEl) {
+      if (!(targetEl instanceof Element)) return false;
+      if (!looksLikeLeftPaneInteractive(targetEl)) return false;
+      var rowish = targetEl.closest('[role="option"], [role="gridcell"], [role="row"]');
+      return !!rowish;
+    }
+    function isProbablyMessageComposer(activeEl) {
+      if (!(activeEl instanceof HTMLElement)) return false;
+      if (!(activeEl.getAttribute('role') === 'textbox')) return false;
+      if (!(activeEl.getAttribute('contenteditable') === 'true')) return false;
+      var lbl = hint(activeEl);
+      if (lbl.indexOf('search') !== -1) return false;
+      var r = rectRight(activeEl);
+      return r > window.innerWidth * 0.38;
+    }
+    function resolveComposerField() {
+      var nodes = document.querySelectorAll('div[role="textbox"][contenteditable="true"]');
+      var bestEl = null;
+      var bestArea = -1;
+      var i;
+      var el;
+      var r;
+      var area;
+      var lbl;
+      for (i = 0; i < nodes.length; i++) {
+        el = nodes.item(i);
+        if (!(el instanceof HTMLElement)) continue;
+        r = el.getBoundingClientRect();
+        if (r.width < 96 || r.height < 24) continue;
+        if (r.right <= window.innerWidth * 0.38) continue;
+        if (hint(el).indexOf('search') !== -1) continue;
+        lbl = (el.getAttribute('aria-placeholder') || el.getAttribute('data-placeholder') || '').toLowerCase();
+        area = r.width * r.height;
+        if (lbl.indexOf('aa') !== -1 || hint(el).indexOf('message') !== -1) {
+          bestEl = el;
+          break;
+        }
+        if (area > bestArea && r.bottom > window.innerHeight * 0.4) {
+          bestEl = el;
+          bestArea = area;
+        }
+      }
+      return bestEl;
+    }
+    function tryFocusComposer() {
+      var el = resolveComposerField();
+      if (!el) return false;
+      el.focus({ preventScroll: true });
+      return document.activeElement === el;
+    }
+    function scheduleFocusComposerBurst() {
+      var delaysMs = [0, 48, 120, 260, 420];
+      var j;
+      for (j = 0; j < delaysMs.length; j++) {
+        window.setTimeout(tryFocusComposer, delaysMs[j]);
+      }
+    }
+    function scheduleStickMessengerSearchFocus() {
+      var delaysMs = [0, 32, 96, 200, 360];
+      var k;
+      for (k = 0; k < delaysMs.length; k++) {
+        window.setTimeout(function () {
+          var node = pickMessengerSearchInputAnyStrictness();
+          if (!node || document.activeElement === node) return;
+          selectInput(node);
+        }, delaysMs[k]);
+      }
+    }
+    function currentThreadMarkerFromLocation() {
+      var m = window.location.pathname.match(/\\/t\\/([^/]+)/);
+      return m ? m[1] : '';
+    }
+    function normalizeThreadHref(href) {
+      try {
+        return new URL(href, window.location.origin).href;
+      } catch (e1) {
+        return '';
+      }
+    }
+    function gatherChatSidebarRows() {
+      var innerW = window.innerWidth;
+      var leftCut = innerW * 0.54;
+      var minTop = 48;
+      var rows = [];
+      var seen =
+        typeof WeakSet === 'function'
+          ? new WeakSet()
+          : {
+              _: [],
+              has: function (node) {
+                return this._.indexOf(node) !== -1;
+              },
+              add: function (node) {
+                this._.push(node);
+              },
+            };
+      var nodes = document.querySelectorAll('[role="row"]');
+      var i;
+      var el;
+      var r;
+      for (i = 0; i < nodes.length; i++) {
+        el = nodes.item(i);
+        if (!(el instanceof HTMLElement)) continue;
+        r = el.getBoundingClientRect();
+        if (r.right > leftCut || r.left < -2) continue;
+        if (r.bottom < minTop || r.height < 14 || r.width < 56) continue;
+        if (!el.querySelector('a[href*="/messages/t"]') && !el.querySelector('a[href*="/messages/e2ee/t"]')) continue;
+        if (seen.has(el)) continue;
+        seen.add(el);
+        rows.push(el);
+      }
+      rows.sort(function (a, b) {
+        return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+      });
+      return rows;
+    }
+    function rowSelectionScore(row, threadMarker) {
+      var score = 0;
+      if (!(row instanceof Element)) return 0;
+      if (row.getAttribute('aria-selected') === 'true') score += 4;
+      if (row.getAttribute('aria-current') === 'true') score += 4;
+      if (row.querySelector('[aria-current="true"]')) score += 3;
+      if (typeof row.matches === 'function' && row.matches(':focus-within')) score += 2;
+      if (threadMarker) {
+        var link = row.querySelector('a[href*="/messages/"]');
+        if (link instanceof HTMLAnchorElement) {
+          var full = normalizeThreadHref(link.getAttribute('href') || '');
+          if (full.indexOf(threadMarker) !== -1) score += 6;
+        }
+      }
+      return score;
+    }
+    function findActiveChatRowIndex(rows) {
+      if (rows.length === 0) return -1;
+      var threadMarker = currentThreadMarkerFromLocation();
+      var bestIdx = 0;
+      var bestScore = -1;
+      var i;
+      var s;
+      for (i = 0; i < rows.length; i++) {
+        s = rowSelectionScore(rows[i], threadMarker);
+        if (s > bestScore) {
+          bestScore = s;
+          bestIdx = i;
+        }
+      }
+      if (bestScore >= 2) return bestIdx;
+      return 0;
+    }
+    function activateChatRow(row) {
+      row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      var clickEl = row.querySelector('a[href*="/messages/t"], a[href*="/messages/e2ee/t"]');
+      if (!(clickEl instanceof HTMLElement)) {
+        clickEl = row.querySelector('a[href*="/messages/"]');
+      }
+      if (!(clickEl instanceof HTMLElement)) {
+        clickEl = row.querySelector('[role="link"]');
+      }
+      if (!(clickEl instanceof HTMLElement)) {
+        clickEl = row;
+      }
+      clickEl.click();
+    }
+    function navigateChatsByAltArrow(delta) {
+      var rows = gatherChatSidebarRows();
+      if (rows.length === 0) return false;
+      var idx = findActiveChatRowIndex(rows);
+      var next = idx + delta;
+      if (next < 0) next = 0;
+      if (next >= rows.length) next = rows.length - 1;
+      if (next === idx) return false;
+      activateChatRow(rows[next]);
+      window.requestAnimationFrame(function () {
+        window.setTimeout(scheduleFocusComposerBurst, 0);
+      });
+      return true;
+    }
+    window.__ownMessengerNavigateChatsByDelta = function (delta) {
+      return navigateChatsByAltArrow(delta);
+    };
+    window.__ownMessengerOpenInboxSearch = function () {
+      var el = pickMessengerSearchInputAnyStrictness();
+      if (!el) return false;
+      selectInput(el);
+      scheduleStickMessengerSearchFocus();
+      return true;
+    };
+    if (window[NS]) return;
+    window[NS] = true;
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.key !== 'k' && event.key !== 'K') return;
+        var isMacLike = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+        if (isMacLike) {
+          if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return;
+        } else {
+          if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        }
+        if (event.repeat || event.isComposing) return;
+        if (typeof window.__ownMessengerOpenInboxSearch !== 'function') return;
+        window.__ownMessengerOpenInboxSearch();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true
+    );
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.key !== 'Enter' || event.repeat || event.isComposing) return;
+        if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+        var active = document.activeElement;
+        var targetEl = event.target;
+        if (active instanceof HTMLElement && isProbablyMessageComposer(active)) return;
+        var fromSearchField = active instanceof HTMLInputElement && isMessengerSearchInput(active);
+        var fromResultsRow =
+          targetEl instanceof Element && looksLikeSearchPickEnterTarget(targetEl);
+        if (!fromSearchField && !fromResultsRow) return;
+        window.requestAnimationFrame(function () {
+          window.setTimeout(scheduleFocusComposerBurst, 0);
+        });
+      },
+      false
+    );
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.repeat || event.isComposing) return;
+        if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        var delta = event.key === 'ArrowUp' ? -1 : 1;
+        if (typeof window.__ownMessengerNavigateChatsByDelta !== 'function') return;
+        if (!window.__ownMessengerNavigateChatsByDelta(delta)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true
+    );
+  })();
+`;
+
+const OPEN_MESSENGER_INBOX_SEARCH_SCRIPT =
+  INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT + '\nvoid window.__ownMessengerOpenInboxSearch();';
+
+function redirectCmdKFromShellToMessenger(
+  event: Electron.Event,
+  messengerContents: Electron.WebContents,
+): void {
+  event.preventDefault();
+  messengerContents.focus();
+  void messengerContents.executeJavaScript(OPEN_MESSENGER_INBOX_SEARCH_SCRIPT, true).catch(() => undefined);
+}
+
+function redirectAltChatNavFromShellToMessenger(
+  event: Electron.Event,
+  messengerContents: Electron.WebContents,
+  delta: number,
+): void {
+  event.preventDefault();
+  messengerContents.focus();
+  const script =
+    INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT +
+    `\nvoid (typeof window.__ownMessengerNavigateChatsByDelta==="function"?window.__ownMessengerNavigateChatsByDelta(${delta}):0);`;
+  void messengerContents.executeJavaScript(script, true).catch(() => undefined);
+}
+
+function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Input): void {
+  const messengerContents = messengerShortcutWebContents;
+  if (!messengerContents || messengerContents.isDestroyed()) return;
+  if (isSearchChatsAccelerator(input)) {
+    redirectCmdKFromShellToMessenger(event, messengerContents);
+    return;
+  }
+  if (isAltChatNavAccelerator(input)) {
+    const delta = input.key === 'ArrowUp' ? -1 : 1;
+    redirectAltChatNavFromShellToMessenger(event, messengerContents, delta);
+  }
+}
+
 function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
   const pickerWindow = new BrowserWindow({
     width: 800,
@@ -60,7 +415,23 @@ function createWindow(): void {
 
   mainWindow.loadFile(path.join(__dirname, '..', 'src', 'renderer', 'index.html'));
 
+  mainWindow.webContents.on('before-input-event', mainShellShortcutDispatcher);
+
   mainWindow.webContents.on('did-attach-webview', (_, webContents) => {
+    const previousCleanup = messengerGuestDomReadyCleanup;
+    if (previousCleanup !== null && !previousCleanup.wc.isDestroyed()) {
+      previousCleanup.wc.removeListener('dom-ready', previousCleanup.fn);
+    }
+
+    messengerShortcutWebContents = webContents;
+
+    const installHotkeyIntoGuest = (): void => {
+      void webContents.executeJavaScript(INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT, true).catch(() => undefined);
+    };
+    messengerGuestDomReadyCleanup = { wc: webContents, fn: installHotkeyIntoGuest };
+    webContents.removeListener('dom-ready', installHotkeyIntoGuest);
+    webContents.on('dom-ready', installHotkeyIntoGuest);
+
     webContents.setWindowOpenHandler(({ url }) => {
       const isFacebookURL =
         !url ||
