@@ -28,6 +28,14 @@ function isAltChatNavAccelerator(input: Electron.Input): boolean {
   return input.key === 'ArrowUp' || input.key === 'ArrowDown';
 }
 
+function isCmdChatIndexAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (!(input.meta || input.control)) return false;
+  if (input.alt || input.shift) return false;
+  return input.key.length === 1 && input.key >= '1' && input.key <= '9';
+}
+
 const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
   void (function () {
     var NS = '__ownMessengerInboxSearchHotkey';
@@ -242,6 +250,12 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       }
       clickEl.click();
     }
+    function activateChatRowAndRefocusComposer(row) {
+      activateChatRow(row);
+      window.requestAnimationFrame(function () {
+        window.setTimeout(scheduleFocusComposerBurst, 0);
+      });
+    }
     function navigateChatsByAltArrow(delta) {
       var rows = gatherChatSidebarRows();
       if (rows.length === 0) return false;
@@ -250,14 +264,20 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       if (next < 0) next = 0;
       if (next >= rows.length) next = rows.length - 1;
       if (next === idx) return false;
-      activateChatRow(rows[next]);
-      window.requestAnimationFrame(function () {
-        window.setTimeout(scheduleFocusComposerBurst, 0);
-      });
+      activateChatRowAndRefocusComposer(rows[next]);
+      return true;
+    }
+    function navigateChatsByIndex(index) {
+      var rows = gatherChatSidebarRows();
+      if (index < 0 || index >= rows.length) return false;
+      activateChatRowAndRefocusComposer(rows[index]);
       return true;
     }
     window.__ownMessengerNavigateChatsByDelta = function (delta) {
       return navigateChatsByAltArrow(delta);
+    };
+    window.__ownMessengerNavigateChatsByIndex = function (index) {
+      return navigateChatsByIndex(index);
     };
     window.__ownMessengerOpenInboxSearch = function () {
       var el = pickMessengerSearchInputAnyStrictness();
@@ -318,6 +338,20 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       },
       true
     );
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.repeat || event.isComposing) return;
+        if (event.altKey || event.shiftKey) return;
+        if (event.key.length !== 1 || event.key < '1' || event.key > '9') return;
+        if (!event.metaKey && !event.ctrlKey) return;
+        if (typeof window.__ownMessengerNavigateChatsByIndex !== 'function') return;
+        if (!window.__ownMessengerNavigateChatsByIndex(Number(event.key) - 1)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true
+    );
   })();
 `;
 
@@ -346,11 +380,28 @@ function redirectAltChatNavFromShellToMessenger(
   void messengerContents.executeJavaScript(script, true).catch(() => undefined);
 }
 
+function redirectCmdChatIndexFromShellToMessenger(
+  event: Electron.Event,
+  messengerContents: Electron.WebContents,
+  index: number,
+): void {
+  event.preventDefault();
+  messengerContents.focus();
+  const script =
+    INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT +
+    `\nvoid (typeof window.__ownMessengerNavigateChatsByIndex==="function"?window.__ownMessengerNavigateChatsByIndex(${index}):0);`;
+  void messengerContents.executeJavaScript(script, true).catch(() => undefined);
+}
+
 function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Input): void {
   const messengerContents = messengerShortcutWebContents;
   if (!messengerContents || messengerContents.isDestroyed()) return;
   if (isSearchChatsAccelerator(input)) {
     redirectCmdKFromShellToMessenger(event, messengerContents);
+    return;
+  }
+  if (isCmdChatIndexAccelerator(input)) {
+    redirectCmdChatIndexFromShellToMessenger(event, messengerContents, Number(input.key) - 1);
     return;
   }
   if (isAltChatNavAccelerator(input)) {
