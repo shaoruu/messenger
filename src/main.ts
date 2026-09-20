@@ -1,11 +1,37 @@
-import { app, BrowserWindow, session, ipcMain, shell, clipboard, Menu, desktopCapturer } from 'electron';
+import { app, BrowserWindow, session, ipcMain, shell, clipboard, Menu, desktopCapturer, systemPreferences } from 'electron';
 import * as path from 'path';
 
 type DisplayMediaCallback = (streams: { video?: Electron.Video }) => void;
 let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
+let pendingSources: Electron.DesktopCapturerSource[] = [];
+let pickerWindow: BrowserWindow | null = null;
+let screenSharePickerActive = false;
 
-function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
-  const pickerWindow = new BrowserWindow({
+function settleDisplayMedia(source: Electron.DesktopCapturerSource | null): void {
+  const callback = pendingDisplayMediaCallback;
+  pendingDisplayMediaCallback = null;
+  pendingSources = [];
+  screenSharePickerActive = false;
+
+  const openPicker = pickerWindow;
+  pickerWindow = null;
+  if (openPicker && !openPicker.isDestroyed()) {
+    openPicker.close();
+  }
+
+  if (callback) {
+    callback(source ? { video: source } : {});
+  }
+}
+
+function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): void {
+  const existing = pickerWindow;
+  pickerWindow = null;
+  if (existing && !existing.isDestroyed()) {
+    existing.close();
+  }
+
+  const win = new BrowserWindow({
     width: 800,
     height: 600,
     parent: mainWindow,
@@ -20,19 +46,97 @@ function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.Desktop
     },
   });
 
-  pickerWindow.loadFile(path.join(__dirname, '..', 'src', 'picker', 'picker.html'));
+  pickerWindow = win;
 
-  pickerWindow.webContents.on('did-finish-load', () => {
+  win.loadFile(path.join(__dirname, '..', 'src', 'picker', 'picker.html'));
+
+  win.webContents.on('did-finish-load', () => {
     const sourcesData = sources.map((source) => ({
       id: source.id,
       name: source.name,
       thumbnail: source.thumbnail.toDataURL(),
     }));
-    pickerWindow.webContents.send('sources', sourcesData);
-    pickerWindow.show();
+    win.webContents.send('sources', sourcesData);
+    win.show();
   });
 
-  return pickerWindow;
+  win.on('closed', () => {
+    if (pickerWindow !== win) {
+      return;
+    }
+    pickerWindow = null;
+    if (pendingDisplayMediaCallback) {
+      settleDisplayMedia(null);
+    }
+  });
+}
+
+async function requestMacMediaAccess(mediaTypes?: Array<'video' | 'audio'>): Promise<void> {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+  const types = mediaTypes ?? ['video', 'audio'];
+  if (types.includes('video')) {
+    await systemPreferences.askForMediaAccess('camera');
+  }
+  if (types.includes('audio')) {
+    await systemPreferences.askForMediaAccess('microphone');
+  }
+}
+
+function setupMediaCapture(ses: Electron.Session, mainWindow: BrowserWindow): void {
+  ses.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
+    if (permission === 'media' && process.platform === 'darwin') {
+      if (details.mediaType === 'video') {
+        return systemPreferences.getMediaAccessStatus('camera') === 'granted';
+      }
+      if (details.mediaType === 'audio') {
+        return systemPreferences.getMediaAccessStatus('microphone') === 'granted';
+      }
+    }
+    return true;
+  });
+
+  ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    if (permission === 'display-capture') {
+      screenSharePickerActive = true;
+      callback(true);
+      return;
+    }
+    if (permission === 'media') {
+      const mediaTypes = (details as Electron.MediaAccessPermissionRequest).mediaTypes;
+      void requestMacMediaAccess(mediaTypes).then(() => callback(true));
+      return;
+    }
+    callback(true);
+  });
+
+  // On macOS 15+ the system picker is used and this handler is not called.
+  ses.setDisplayMediaRequestHandler(
+    async (_request, callback) => {
+      screenSharePickerActive = true;
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ['screen', 'window'],
+          thumbnailSize: { width: 320, height: 180 },
+        });
+        if (sources.length === 0) {
+          screenSharePickerActive = false;
+          callback({});
+          return;
+        }
+
+        pendingSources = sources;
+        pendingDisplayMediaCallback = callback;
+        createPickerWindow(mainWindow, sources);
+      } catch (error) {
+        console.error('Screen share: failed to list sources', error);
+        screenSharePickerActive = false;
+        callback({});
+      }
+    },
+    { useSystemPicker: true },
+  );
 }
 
 function createWindow(): void {
@@ -60,6 +164,8 @@ function createWindow(): void {
 
   mainWindow.loadFile(path.join(__dirname, '..', 'src', 'renderer', 'index.html'));
 
+  setupMediaCapture(ses, mainWindow);
+
   mainWindow.webContents.on('did-attach-webview', (_, webContents) => {
     webContents.setWindowOpenHandler(({ url }) => {
       const isFacebookURL =
@@ -70,28 +176,24 @@ function createWindow(): void {
         url.startsWith('https://www.messenger.com') ||
         url.startsWith('https://messenger.com');
       if (isFacebookURL) {
-        return { action: 'allow' };
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            webPreferences: {
+              partition: 'persist:messenger',
+            },
+          },
+        };
       }
       shell.openExternal(url);
       return { action: 'deny' };
-    });
-
-    webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
-      desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } }).then((sources) => {
-        if (sources.length === 0) {
-          callback({});
-          return;
-        }
-
-        pendingDisplayMediaCallback = callback;
-        createPickerWindow(mainWindow, sources);
-      });
     });
   });
 }
 
 app.whenReady().then(() => {
   createWindow();
+  void requestMacMediaAccess();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -135,26 +237,11 @@ ipcMain.on('show-link-context-menu', (event, linkURL: string) => {
   }
 });
 
-ipcMain.on('source-selected', (event, sourceId: string) => {
-  const pickerWindow = BrowserWindow.fromWebContents(event.sender);
-  if (pickerWindow) {
-    pickerWindow.close();
-  }
-
-  if (pendingDisplayMediaCallback && sourceId) {
-    pendingDisplayMediaCallback({ video: { id: sourceId, name: sourceId } });
-    pendingDisplayMediaCallback = null;
-  }
+ipcMain.on('source-selected', (_event, sourceId: string) => {
+  const source = pendingSources.find((item) => item.id === sourceId) ?? null;
+  settleDisplayMedia(source);
 });
 
-ipcMain.on('picker-cancelled', (event) => {
-  const pickerWindow = BrowserWindow.fromWebContents(event.sender);
-  if (pickerWindow) {
-    pickerWindow.close();
-  }
-
-  if (pendingDisplayMediaCallback) {
-    pendingDisplayMediaCallback({});
-    pendingDisplayMediaCallback = null;
-  }
+ipcMain.on('picker-cancelled', () => {
+  settleDisplayMedia(null);
 });

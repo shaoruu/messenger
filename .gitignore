@@ -1,6 +1,7 @@
 node_modules/
 dist/
-build/
+build/*
+!build/entitlements.mac.plist
 release/
 .DS_Store
 *.log

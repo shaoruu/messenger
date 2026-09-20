@@ -8,6 +8,12 @@ files:
 mac:
   category: public.app-category.social-networking
   icon: logo.png
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSCameraUsageDescription: Messenger needs camera access for video calls.
+    NSMicrophoneUsageDescription: Messenger needs microphone access for calls.
   target:
     - target: dmg
       arch:
