@@ -103,46 +103,112 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       return r > window.innerWidth * 0.38;
     }
     function resolveComposerField() {
-      var nodes = document.querySelectorAll('div[role="textbox"][contenteditable="true"]');
+      var nodes = document.querySelectorAll(
+        '[contenteditable="true"][role="textbox"], [contenteditable="true"][data-lexical-editor="true"]'
+      );
+      var innerW = window.innerWidth;
+      var innerH = window.innerHeight;
       var bestEl = null;
-      var bestArea = -1;
+      var bestScore = -1;
       var i;
       var el;
       var r;
-      var area;
+      var h;
       var lbl;
+      var score;
       for (i = 0; i < nodes.length; i++) {
         el = nodes.item(i);
         if (!(el instanceof HTMLElement)) continue;
         r = el.getBoundingClientRect();
-        if (r.width < 96 || r.height < 24) continue;
-        if (r.right <= window.innerWidth * 0.38) continue;
-        if (hint(el).indexOf('search') !== -1) continue;
-        lbl = (el.getAttribute('aria-placeholder') || el.getAttribute('data-placeholder') || '').toLowerCase();
-        area = r.width * r.height;
-        if (lbl.indexOf('aa') !== -1 || hint(el).indexOf('message') !== -1) {
-          bestEl = el;
-          break;
+        if (r.width < 48 || r.height < 8) continue;
+        if (r.right <= innerW * 0.38 || r.bottom <= 0 || r.top >= innerH) continue;
+        if (
+          typeof el.checkVisibility === 'function' &&
+          !el.checkVisibility({ checkVisibilityCSS: true, visibilityProperty: true })
+        ) {
+          continue;
         }
-        if (area > bestArea && r.bottom > window.innerHeight * 0.4) {
+        h = hint(el);
+        if (h.indexOf('search') !== -1) continue;
+        lbl = (el.getAttribute('aria-placeholder') || el.getAttribute('data-placeholder') || '').toLowerCase();
+        score = r.bottom / innerH;
+        if (h.indexOf('message') !== -1) score += 4;
+        if (lbl.indexOf('aa') !== -1) score += 2;
+        if (el.getAttribute('data-lexical-editor') === 'true') score += 1;
+        if (score > bestScore) {
           bestEl = el;
-          bestArea = area;
+          bestScore = score;
         }
       }
       return bestEl;
     }
-    function tryFocusComposer() {
-      var el = resolveComposerField();
-      if (!el) return false;
-      el.focus({ preventScroll: true });
-      return document.activeElement === el;
+    function isEditableElement(el) {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.isContentEditable) return true;
+      if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true;
+      if (!(el instanceof HTMLInputElement)) return false;
+      return ['button', 'checkbox', 'radio', 'submit', 'reset', 'image', 'file', 'range', 'color'].indexOf(el.type) === -1;
     }
-    function scheduleFocusComposerBurst() {
-      var delaysMs = [0, 48, 120, 260, 420];
-      var j;
-      for (j = 0; j < delaysMs.length; j++) {
-        window.setTimeout(tryFocusComposer, delaysMs[j]);
+    function focusComposer(el) {
+      var sel = window.getSelection();
+      var hadCaretInside = !!sel && sel.rangeCount > 0 && el.contains(sel.anchorNode);
+      el.focus({ preventScroll: true });
+      if (!sel || hadCaretInside || document.activeElement !== el) return;
+      sel.selectAllChildren(el);
+      sel.collapseToEnd();
+    }
+    function shouldPullFocusToComposer(active, composer, startActive, previous) {
+      if (active === composer) return false;
+      if (!(active instanceof HTMLElement) || active === document.body) return true;
+      if (active === startActive || active === previous) return true;
+      if (active.closest('[role="dialog"], [aria-modal="true"]')) return false;
+      return !isEditableElement(active);
+    }
+    function cancelComposerFocus() {
+      window.__ownMessengerComposerFocusToken = (window.__ownMessengerComposerFocusToken || 0) + 1;
+    }
+    function focusComposerAfterNavigation(targetMarker, navigate) {
+      cancelComposerFocus();
+      var token = window.__ownMessengerComposerFocusToken;
+      var startMarker = currentThreadMarkerFromLocation();
+      // The old thread's composer can stay mounted until the new thread renders; typing into it would go to the previous chat.
+      var previous = targetMarker && targetMarker !== startMarker ? resolveComposerField() : null;
+      var startActive = document.activeElement;
+      var previousChanged = false;
+      var observer = null;
+      if (previous) {
+        if (startActive === previous) previous.blur();
+        observer = new MutationObserver(function () {
+          previousChanged = true;
+        });
+        observer.observe(previous, { childList: true, subtree: true, characterData: true });
       }
+      if (navigate) navigate();
+      var startedAt = Date.now();
+      var arrivedAt = targetMarker ? 0 : startedAt;
+      function tick() {
+        var now = Date.now();
+        if (window.__ownMessengerComposerFocusToken !== token || now - startedAt > 4000) {
+          if (observer) observer.disconnect();
+          return;
+        }
+        if (!arrivedAt) {
+          var marker = currentThreadMarkerFromLocation();
+          if (marker === targetMarker || marker !== startMarker || now - startedAt >= 1200) arrivedAt = now;
+        }
+        if (arrivedAt) {
+          var composer = resolveComposerField();
+          if (
+            composer &&
+            (composer !== previous || previousChanged || now - arrivedAt >= 1500) &&
+            shouldPullFocusToComposer(document.activeElement, composer, startActive, previous)
+          ) {
+            focusComposer(composer);
+          }
+        }
+        window.setTimeout(tick, 32);
+      }
+      tick();
     }
     function scheduleStickMessengerSearchFocus() {
       var delaysMs = [0, 32, 96, 200, 360];
@@ -155,9 +221,12 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
         }, delaysMs[k]);
       }
     }
-    function currentThreadMarkerFromLocation() {
-      var m = window.location.pathname.match(/\\/t\\/([^/]+)/);
+    function threadMarkerFromPath(path) {
+      var m = path.match(/\\/t\\/([^/?#]+)/);
       return m ? m[1] : '';
+    }
+    function currentThreadMarkerFromLocation() {
+      return threadMarkerFromPath(window.location.pathname);
     }
     function normalizeThreadHref(href) {
       try {
@@ -236,24 +305,26 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       if (bestScore >= 2) return bestIdx;
       return 0;
     }
-    function activateChatRow(row) {
+    function findChatRowLink(row) {
+      var link = row.querySelector('a[href*="/messages/t"], a[href*="/messages/e2ee/t"]');
+      if (!(link instanceof HTMLElement)) {
+        link = row.querySelector('a[href*="/messages/"]');
+      }
+      return link instanceof HTMLElement ? link : null;
+    }
+    function activateChatRow(row, link) {
       row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      var clickEl = row.querySelector('a[href*="/messages/t"], a[href*="/messages/e2ee/t"]');
-      if (!(clickEl instanceof HTMLElement)) {
-        clickEl = row.querySelector('a[href*="/messages/"]');
-      }
-      if (!(clickEl instanceof HTMLElement)) {
-        clickEl = row.querySelector('[role="link"]');
-      }
+      var clickEl = link || row.querySelector('[role="link"]');
       if (!(clickEl instanceof HTMLElement)) {
         clickEl = row;
       }
       clickEl.click();
     }
     function activateChatRowAndRefocusComposer(row) {
-      activateChatRow(row);
-      window.requestAnimationFrame(function () {
-        window.setTimeout(scheduleFocusComposerBurst, 0);
+      var link = findChatRowLink(row);
+      var targetMarker = link ? threadMarkerFromPath(link.getAttribute('href') || '') : '';
+      focusComposerAfterNavigation(targetMarker, function () {
+        activateChatRow(row, link);
       });
     }
     function navigateChatsByAltArrow(delta) {
@@ -280,6 +351,7 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       return navigateChatsByIndex(index);
     };
     window.__ownMessengerOpenInboxSearch = function () {
+      cancelComposerFocus();
       var el = pickMessengerSearchInputAnyStrictness();
       if (!el) return false;
       selectInput(el);
@@ -319,10 +391,20 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
           targetEl instanceof Element && looksLikeSearchPickEnterTarget(targetEl);
         if (!fromSearchField && !fromResultsRow) return;
         window.requestAnimationFrame(function () {
-          window.setTimeout(scheduleFocusComposerBurst, 0);
+          window.setTimeout(function () {
+            focusComposerAfterNavigation('', null);
+          }, 0);
         });
       },
       false
+    );
+    window.addEventListener('pointerdown', cancelComposerFocus, true);
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.key === 'Escape' || event.key === 'Tab') cancelComposerFocus();
+      },
+      true
     );
     window.addEventListener(
       'keydown',
