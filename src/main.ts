@@ -21,6 +21,14 @@ function isSearchChatsAccelerator(input: Electron.Input): boolean {
   return input.key.toLowerCase() === 'k';
 }
 
+function isFocusComposerAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (!(input.meta || input.control)) return false;
+  if (input.alt || input.shift) return false;
+  return input.key.toLowerCase() === 'i';
+}
+
 function isAltChatNavAccelerator(input: Electron.Input): boolean {
   if (input.type !== 'keyDown') return false;
   if (input.isAutoRepeat || input.isComposing) return false;
@@ -358,12 +366,17 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       scheduleStickMessengerSearchFocus();
       return true;
     };
+    window.__ownMessengerFocusComposer = function () {
+      focusComposerAfterNavigation('', null);
+    };
     if (window[NS]) return;
     window[NS] = true;
     window.addEventListener(
       'keydown',
       function (event) {
-        if (event.key !== 'k' && event.key !== 'K') return;
+        var isSearchKey = event.key === 'k' || event.key === 'K';
+        var isComposerKey = event.key === 'i' || event.key === 'I';
+        if (!isSearchKey && !isComposerKey) return;
         var isMacLike = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
         if (isMacLike) {
           if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return;
@@ -371,8 +384,9 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
           if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
         }
         if (event.repeat || event.isComposing) return;
-        if (typeof window.__ownMessengerOpenInboxSearch !== 'function') return;
-        window.__ownMessengerOpenInboxSearch();
+        var action = isSearchKey ? window.__ownMessengerOpenInboxSearch : window.__ownMessengerFocusComposer;
+        if (typeof action !== 'function') return;
+        action();
         event.preventDefault();
         event.stopImmediatePropagation();
       },
@@ -440,6 +454,9 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
 const OPEN_MESSENGER_INBOX_SEARCH_SCRIPT =
   INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT + '\nvoid window.__ownMessengerOpenInboxSearch();';
 
+const FOCUS_MESSENGER_COMPOSER_SCRIPT =
+  INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT + '\nvoid window.__ownMessengerFocusComposer();';
+
 function redirectCmdKFromShellToMessenger(
   event: Electron.Event,
   messengerContents: Electron.WebContents,
@@ -447,6 +464,15 @@ function redirectCmdKFromShellToMessenger(
   event.preventDefault();
   messengerContents.focus();
   void messengerContents.executeJavaScript(OPEN_MESSENGER_INBOX_SEARCH_SCRIPT, true).catch(() => undefined);
+}
+
+function redirectCmdIFromShellToMessenger(
+  event: Electron.Event,
+  messengerContents: Electron.WebContents,
+): void {
+  event.preventDefault();
+  messengerContents.focus();
+  void messengerContents.executeJavaScript(FOCUS_MESSENGER_COMPOSER_SCRIPT, true).catch(() => undefined);
 }
 
 function redirectAltChatNavFromShellToMessenger(
@@ -480,6 +506,10 @@ function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Inpu
   if (!messengerContents || messengerContents.isDestroyed()) return;
   if (isSearchChatsAccelerator(input)) {
     redirectCmdKFromShellToMessenger(event, messengerContents);
+    return;
+  }
+  if (isFocusComposerAccelerator(input)) {
+    redirectCmdIFromShellToMessenger(event, messengerContents);
     return;
   }
   if (isCmdChatIndexAccelerator(input)) {
