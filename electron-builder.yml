@@ -5,6 +5,9 @@ directories:
 files:
   - dist/**/*
   - src/renderer/**/*
+extraResources:
+  - from: dist-native/window-chrome.node
+    to: window-chrome.node
 mac:
   category: public.app-category.social-networking
   icon: logo.png

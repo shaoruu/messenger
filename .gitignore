@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-native/
 build/
 release/
 .DS_Store

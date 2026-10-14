@@ -553,6 +553,22 @@ function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.Desktop
   return pickerWindow;
 }
 
+// macOS Tahoe only draws the larger corner radius native apps have on windows with a
+// toolbar, and no titleBarStyle adds one anymore (see src/native/window-chrome.m).
+function attachEmptyToolbar(window: BrowserWindow): void {
+  if (process.platform !== 'darwin') return;
+  const addonPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'window-chrome.node')
+    : path.join(__dirname, '..', 'dist-native', 'window-chrome.node');
+  try {
+    require(addonPath).attachEmptyToolbar(window.getNativeWindowHandle());
+    // AppKit re-centers the traffic lights in the toolbar; put them back in the nav bar.
+    window.setWindowButtonPosition(window.getWindowButtonPosition());
+  } catch (error) {
+    console.error('Could not attach the window toolbar', error);
+  }
+}
+
 function createWindow(): void {
   const partition = 'persist:messenger';
   const ses = session.fromPartition(partition);
@@ -574,7 +590,10 @@ function createWindow(): void {
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
+    // Shown wherever the page hasn't painted yet, like the strip a resize exposes.
+    backgroundColor: '#242526',
   });
+  attachEmptyToolbar(mainWindow);
 
   mainWindow.loadFile(path.join(__dirname, '..', 'src', 'renderer', 'index.html'));
 
