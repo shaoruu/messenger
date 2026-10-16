@@ -2,6 +2,7 @@ interface ElectronAPI {
   platform: string;
   copyToClipboard: (text: string) => void;
   openExternal: (url: string) => void;
+  onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
 }
 
 const api = (window as unknown as { electronAPI: ElectronAPI }).electronAPI;
@@ -10,6 +11,10 @@ const webview = document.getElementById('messenger') as Electron.WebviewTag;
 const backBtn = document.getElementById('back') as HTMLButtonElement;
 const forwardBtn = document.getElementById('forward') as HTMLButtonElement;
 const refreshBtn = document.getElementById('refresh') as HTMLButtonElement;
+
+api.onFullScreenChange((isFullScreen) => {
+  document.body.classList.toggle('fullscreen', isFullScreen);
+});
 
 function isFacebookURL(url: string): boolean {
   try {

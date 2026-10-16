@@ -597,6 +597,8 @@ function createWindow(): void {
     backgroundColor: '#242526',
   });
   attachEmptyToolbar(mainWindow);
+  mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('full-screen-changed', true));
+  mainWindow.on('leave-full-screen', () => mainWindow.webContents.send('full-screen-changed', false));
 
   mainWindow.loadFile(path.join(__dirname, '..', 'src', 'renderer', 'index.html'));
 
