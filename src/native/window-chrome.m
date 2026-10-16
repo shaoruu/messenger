@@ -1,6 +1,7 @@
 // macOS Tahoe only gives a window the larger corner radius native apps like System Settings
 // have when the window has a toolbar, and no Electron titleBarStyle adds one anymore. Web
-// contents still receive clicks under the empty toolbar.
+// contents still receive clicks under the empty toolbar. Fullscreen windows have no corners,
+// so the toolbar is hidden there instead of showing as a blank strip above the page.
 #import <AppKit/AppKit.h>
 #include <node_api.h>
 
@@ -20,6 +21,19 @@ static napi_value AttachEmptyToolbar(napi_env env, napi_callback_info info) {
   NSWindow *window = view.window;
   if (window != nil && window.toolbar == nil) {
     window.toolbar = [[NSToolbar alloc] initWithIdentifier:@"messenger-window"];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserverForName:NSWindowWillEnterFullScreenNotification
+                        object:window
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                      ((NSWindow *)note.object).toolbar.visible = NO;
+                    }];
+    [center addObserverForName:NSWindowWillExitFullScreenNotification
+                        object:window
+                         queue:nil
+                    usingBlock:^(NSNotification *note) {
+                      ((NSWindow *)note.object).toolbar.visible = YES;
+                    }];
   }
   return NULL;
 }

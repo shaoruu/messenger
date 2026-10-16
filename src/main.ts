@@ -563,7 +563,10 @@ function attachEmptyToolbar(window: BrowserWindow): void {
   try {
     require(addonPath).attachEmptyToolbar(window.getNativeWindowHandle());
     // AppKit re-centers the traffic lights in the toolbar; put them back in the nav bar.
-    window.setWindowButtonPosition(window.getWindowButtonPosition());
+    const buttonPosition = window.getWindowButtonPosition();
+    window.setWindowButtonPosition(buttonPosition);
+    // The toolbar comes back on leaving fullscreen and re-centers them again.
+    window.on('leave-full-screen', () => window.setWindowButtonPosition(buttonPosition));
   } catch (error) {
     console.error('Could not attach the window toolbar', error);
   }
