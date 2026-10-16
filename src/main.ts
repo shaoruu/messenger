@@ -614,6 +614,10 @@ function createWindow(): void {
     webContents.removeListener('dom-ready', installHotkeyIntoGuest);
     webContents.on('dom-ready', installHotkeyIntoGuest);
 
+    webContents.on('context-menu', (_event, params) => {
+      showGuestContextMenu(mainWindow, webContents, params);
+    });
+
     webContents.setWindowOpenHandler(({ url }) => {
       const isFacebookURL =
         !url ||
@@ -643,6 +647,51 @@ function createWindow(): void {
   });
 }
 
+function showGuestContextMenu(
+  window: BrowserWindow,
+  webContents: Electron.WebContents,
+  params: Electron.ContextMenuParams,
+): void {
+  const template: Electron.MenuItemConstructorOptions[] = [];
+  const addSection = (items: Electron.MenuItemConstructorOptions[]): void => {
+    if (items.length === 0) return;
+    if (template.length > 0) template.push({ type: 'separator' });
+    template.push(...items);
+  };
+
+  if (params.mediaType === 'image' && params.srcURL) {
+    addSection([
+      { label: 'Copy Image', click: () => webContents.copyImageAt(params.x, params.y) },
+      { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) },
+      { label: 'Save Image As…', click: () => webContents.downloadURL(params.srcURL) },
+    ]);
+  }
+
+  if (params.linkURL) {
+    addSection([
+      { label: 'Copy Link', click: () => clipboard.writeText(params.linkURL) },
+      { label: 'Open in Browser', click: () => shell.openExternal(params.linkURL) },
+    ]);
+  }
+
+  if (params.isEditable) {
+    addSection([
+      { role: 'undo', enabled: params.editFlags.canUndo },
+      { role: 'redo', enabled: params.editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
+      { role: 'selectAll', enabled: params.editFlags.canSelectAll },
+    ]);
+  } else if (params.selectionText.trim()) {
+    addSection([{ role: 'copy' }]);
+  }
+
+  if (template.length === 0) return;
+  Menu.buildFromTemplate(template).popup({ window });
+}
+
 app.whenReady().then(() => {
   createWindow();
 
@@ -665,27 +714,6 @@ ipcMain.on('copy-to-clipboard', (_, text: string) => {
 
 ipcMain.on('open-external', (_, url: string) => {
   shell.openExternal(url);
-});
-
-ipcMain.on('show-link-context-menu', (event, linkURL: string) => {
-  const menu = Menu.buildFromTemplate([
-    {
-      label: 'Copy Link',
-      click: () => {
-        clipboard.writeText(linkURL);
-      },
-    },
-    {
-      label: 'Open in Browser',
-      click: () => {
-        shell.openExternal(linkURL);
-      },
-    },
-  ]);
-  const window = BrowserWindow.fromWebContents(event.sender);
-  if (window) {
-    menu.popup({ window });
-  }
 });
 
 ipcMain.on('source-selected', (event, sourceId: string) => {

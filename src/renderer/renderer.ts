@@ -2,7 +2,6 @@ interface ElectronAPI {
   platform: string;
   copyToClipboard: (text: string) => void;
   openExternal: (url: string) => void;
-  showLinkContextMenu: (linkURL: string) => void;
 }
 
 const api = (window as unknown as { electronAPI: ElectronAPI }).electronAPI;
@@ -52,13 +51,6 @@ refreshBtn.addEventListener('click', () => {
 
 webview.addEventListener('dom-ready', () => {
   updateNavButtons();
-});
-
-webview.addEventListener('context-menu', (e) => {
-  const event = e as Electron.ContextMenuEvent;
-  if (event.params.linkURL) {
-    api.showLinkContextMenu(event.params.linkURL);
-  }
 });
 
 webview.addEventListener('new-window', (e) => {
