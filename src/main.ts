@@ -412,6 +412,26 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       },
       false
     );
+    // Typing while nothing editable is focused goes to the composer. Focusing it during keydown makes the
+    // browser insert this same keystroke there, so the first character isn't lost.
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.isComposing || event.defaultPrevented) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key.length !== 1 || event.key === ' ') return;
+        var active = document.activeElement;
+        if (isEditableElement(active)) return;
+        if (active instanceof Element && active.closest('[role="dialog"], [aria-modal="true"], [role="menu"], [role="listbox"]')) {
+          return;
+        }
+        var composer = resolveComposerField();
+        if (!composer) return;
+        cancelComposerFocus();
+        focusComposer(composer);
+      },
+      true
+    );
     window.addEventListener('pointerdown', cancelComposerFocus, true);
     window.addEventListener(
       'keydown',
