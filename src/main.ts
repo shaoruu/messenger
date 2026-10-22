@@ -759,7 +759,12 @@ function guestStartupCss(): string {
       width: 1px !important; height: ${TITLEBAR_HEIGHT}px !important; background: #303233 !important;
       pointer-events: none !important; }`,
   ];
+  // See markFlushLoadingThread in guest-preload.ts; the thread is pushed down by the full strip when the list is hidden.
+  const flush = 'html.own-messenger-thread-flush';
+  rules.push(`${flush} ${THREAD_COLUMN_SELECTOR} { padding-top: ${THREAD_TOP_MARGIN}px !important; }`);
+  rules.push(`${flush}.own-messenger-sidebar-hidden ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT}px !important; }`);
   if (hidden) {
+    rules.push(`${flush}:not(.own-messenger-sidebar-live) ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT}px !important; }`);
     rules.push(`${pending} ${SIDEBAR_COLUMN_SELECTOR} { display: none !important; }`);
     rules.push(`${pending} ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }`);
     rules.push(`${pending} body { background: #1c1c1d !important; }`);
