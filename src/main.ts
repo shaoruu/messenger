@@ -1127,6 +1127,9 @@ ipcMain.on('guest-startup-css', (event) => {
   event.returnValue = guestStartupCss();
 });
 
+// Written by scripts/build-emoji.mjs.
+ipcMain.handle('emoji-data', () => JSON.parse(fs.readFileSync(path.join(__dirname, 'emoji.json'), 'utf8')));
+
 ipcMain.on('get-sidebar-edge', (event) => {
   event.returnValue = getSidebarState().edge;
 });
