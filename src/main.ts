@@ -39,6 +39,13 @@ function isToggleSidebarAccelerator(input: Electron.Input): boolean {
   return key === 'b' || key === 's';
 }
 
+function isPlainEscape(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (input.alt || input.control || input.meta || input.shift) return false;
+  return input.key === 'Escape';
+}
+
 function isAltChatNavAccelerator(input: Electron.Input): boolean {
   if (input.type !== 'keyDown') return false;
   if (input.isAutoRepeat || input.isComposing) return false;
@@ -681,6 +688,24 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       },
       true
     );
+    // Escape leaves the hidden-sidebar mode, unless it's closing one of Facebook's popups.
+    function hasOpenPopup() {
+      var popups = document.querySelectorAll('[role="dialog"], [aria-modal="true"], [role="menu"], [role="listbox"]');
+      for (var i = 0; i < popups.length; i++) {
+        if (popups[i].getBoundingClientRect().width > 0) return true;
+      }
+      return false;
+    }
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.key !== 'Escape' || event.repeat || event.isComposing) return;
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (!state.hidden || hasOpenPopup()) return;
+        setHidden(false);
+      },
+      true
+    );
     window.addEventListener('resize', apply);
     // A screen-reader region of Facebook's hangs 1px below the window, so focus changes can still nudge the
     // (unscrollable) page; keep it pinned.
@@ -831,6 +856,11 @@ function toggleMessengerSidebar(messengerContents: Electron.WebContents): void {
   void messengerContents.executeJavaScript(script, true).catch(() => undefined);
 }
 
+function showMessengerSidebar(messengerContents: Electron.WebContents): void {
+  const script = installMessengerSidebarScript() + '\nvoid window.__ownMessengerShowSidebar();';
+  void messengerContents.executeJavaScript(script, true).catch(() => undefined);
+}
+
 function redirectAltChatNavFromShellToMessenger(
   event: Electron.Event,
   messengerContents: Electron.WebContents,
@@ -871,6 +901,10 @@ function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Inpu
   if (isToggleSidebarAccelerator(input)) {
     event.preventDefault();
     toggleMessengerSidebar(messengerContents);
+    return;
+  }
+  if (isPlainEscape(input)) {
+    showMessengerSidebar(messengerContents);
     return;
   }
   if (isCmdChatIndexAccelerator(input)) {
