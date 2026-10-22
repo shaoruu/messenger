@@ -455,6 +455,27 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       },
       true
     );
+    // Escape in the composer makes Facebook move focus onto the last message, which draws a focus ring around
+    // it; it does so just after the keydown (and stops it propagating), so focus is put back as it arrives.
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.key !== 'Escape' || event.isComposing) return;
+        var composer = document.activeElement;
+        if (!(composer instanceof HTMLElement) || composer !== resolveComposerField()) return;
+        function keepComposerFocused(focusEvent) {
+          var target = focusEvent.target;
+          if (!(target instanceof HTMLElement) || target === composer || isEditableElement(target)) return;
+          if (target.closest('[role="dialog"], [aria-modal="true"], [role="menu"], [role="listbox"]')) return;
+          composer.focus({ preventScroll: true });
+        }
+        document.addEventListener('focusin', keepComposerFocused, true);
+        window.setTimeout(function () {
+          document.removeEventListener('focusin', keepComposerFocused, true);
+        }, 300);
+      },
+      true
+    );
     window.addEventListener(
       'keydown',
       function (event) {
