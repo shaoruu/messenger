@@ -702,6 +702,12 @@ function installMessengerSidebarScript(): string {
   return `window.__ownMessengerSidebarSavedState = ${JSON.stringify(loadSidebarState())};\n` + INSTALL_MESSENGER_SIDEBAR_SCRIPT;
 }
 
+// The guest is a messenger-only window, so Facebook's own site header goes; its layout is sized off --header-height.
+const HIDE_FACEBOOK_BANNER_CSS = `
+  :root, html, body, .__fb-dark-mode, .__fb-light-mode { --header-height: 0px !important; }
+  [role="banner"] { display: none !important; }
+`;
+
 function redirectCmdKFromShellToMessenger(
   event: Electron.Event,
   messengerContents: Electron.WebContents,
@@ -870,6 +876,7 @@ function createWindow(): void {
     const installHotkeyIntoGuest = (): void => {
       void webContents.executeJavaScript(INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT, true).catch(() => undefined);
       void webContents.executeJavaScript(installMessengerSidebarScript(), true).catch(() => undefined);
+      void webContents.insertCSS(HIDE_FACEBOOK_BANNER_CSS).catch(() => undefined);
     };
     messengerGuestDomReadyCleanup = { wc: webContents, fn: installHotkeyIntoGuest };
     webContents.removeListener('dom-ready', installHotkeyIntoGuest);
