@@ -785,6 +785,9 @@ function guestStartupCss(): string {
     `${html}, ${html} :is(body, .__fb-dark-mode, .__fb-light-mode) {
       --header-height: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }`;
   rules.push(threadOffset('html.own-messenger-sidebar-hidden'));
+  // Messages are focusable rows (no role, tabindex 0), and once a key has been pressed Facebook rings whichever one
+  // has focus, the full width of the thread. Buttons, which have a role, keep their rings.
+  rules.push(`${THREAD_COLUMN_SELECTOR} div[tabindex]:not([role]):focus-visible { outline: none !important; }`);
   // See markFlushLoadingThread in guest-preload.ts.
   rules.push(`html.own-messenger-thread-flush ${THREAD_COLUMN_SELECTOR} { padding-top: ${THREAD_TOP_MARGIN}px !important; }`);
   if (hidden) {
