@@ -2,6 +2,7 @@ interface ElectronAPI {
   platform: string;
   copyToClipboard: (text: string) => void;
   openExternal: (url: string) => void;
+  toggleSidebar: () => void;
   onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
 }
 
@@ -11,6 +12,7 @@ const webview = document.getElementById('messenger') as Electron.WebviewTag;
 const backBtn = document.getElementById('back') as HTMLButtonElement;
 const forwardBtn = document.getElementById('forward') as HTMLButtonElement;
 const refreshBtn = document.getElementById('refresh') as HTMLButtonElement;
+const sidebarBtn = document.getElementById('sidebar') as HTMLButtonElement;
 
 api.onFullScreenChange((isFullScreen) => {
   document.body.classList.toggle('fullscreen', isFullScreen);
@@ -52,6 +54,10 @@ forwardBtn.addEventListener('click', () => {
 
 refreshBtn.addEventListener('click', () => {
   webview.reload();
+});
+
+sidebarBtn.addEventListener('click', () => {
+  api.toggleSidebar();
 });
 
 webview.addEventListener('dom-ready', () => {

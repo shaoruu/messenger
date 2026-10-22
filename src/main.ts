@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session, ipcMain, shell, clipboard, Menu, desktopCapturer } from 'electron';
+import * as fs from 'fs';
 import * as path from 'path';
 
 type DisplayMediaCallback = (streams: { video?: Electron.Video }) => void;
@@ -27,6 +28,15 @@ function isFocusComposerAccelerator(input: Electron.Input): boolean {
   if (!(input.meta || input.control)) return false;
   if (input.alt || input.shift) return false;
   return input.key.toLowerCase() === 'i';
+}
+
+function isToggleSidebarAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (!(input.meta || input.control)) return false;
+  if (input.alt || input.shift) return false;
+  const key = input.key.toLowerCase();
+  return key === 'b' || key === 's';
 }
 
 function isAltChatNavAccelerator(input: Electron.Input): boolean {
@@ -89,11 +99,16 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
     function rectRight(el) {
       return el.getBoundingClientRect().right;
     }
+    // The chat list's right edge, which moves when the sidebar is resized.
+    function leftPaneRight(fallbackFraction) {
+      var sidebar = document.querySelector('[data-own-messenger-sidebar]');
+      var r = sidebar ? sidebar.getBoundingClientRect() : null;
+      return r && r.width > 0 ? r.right + 2 : window.innerWidth * fallbackFraction;
+    }
     function looksLikeLeftPaneInteractive(el) {
       if (!(el instanceof Element)) return false;
-      var innerWidth = window.innerWidth;
       var r = el.getBoundingClientRect();
-      return r.left < innerWidth * 0.55 && r.width > 0 && r.right < innerWidth * 0.6;
+      return r.width > 0 && r.right < leftPaneRight(0.6);
     }
     function looksLikeSearchPickEnterTarget(targetEl) {
       if (!(targetEl instanceof Element)) return false;
@@ -244,8 +259,7 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       }
     }
     function gatherChatSidebarRows() {
-      var innerW = window.innerWidth;
-      var leftCut = innerW * 0.54;
+      var leftCut = leftPaneRight(0.54);
       var minTop = 48;
       var rows = [];
       var seen =
@@ -360,6 +374,7 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
     };
     window.__ownMessengerOpenInboxSearch = function () {
       cancelComposerFocus();
+      if (typeof window.__ownMessengerShowSidebar === 'function') window.__ownMessengerShowSidebar();
       var el = pickMessengerSearchInputAnyStrictness();
       if (!el) return false;
       selectInput(el);
@@ -477,6 +492,216 @@ const OPEN_MESSENGER_INBOX_SEARCH_SCRIPT =
 const FOCUS_MESSENGER_COMPOSER_SCRIPT =
   INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT + '\nvoid window.__ownMessengerFocusComposer();';
 
+const SIDEBAR_STATE_MESSAGE_PREFIX = '__ownMessengerSidebarState:';
+
+// Facebook's class names are obfuscated, so the chat list column is found by climbing from a chat link to
+// the widest ancestor that is still narrower than its parent (the row that also holds the open thread).
+const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
+  void (function () {
+    var NS = '__ownMessengerSidebar';
+    if (window[NS]) return;
+    window[NS] = true;
+    var MARK = 'data-own-messenger-sidebar';
+    var FILL = 'data-own-messenger-sidebar-fill';
+    var SIZED = 'own-messenger-sidebar-sized';
+    var HIDDEN = 'own-messenger-sidebar-hidden';
+    var RESIZING = 'own-messenger-sidebar-resizing';
+    var MIN_WIDTH = 200;
+    var MAX_FRACTION = 0.6;
+    var column = null;
+    var naturalWidth = 0;
+    var saved = window.__ownMessengerSidebarSavedState || {};
+    var state = { width: saved.width || 0, hidden: saved.hidden === true };
+    // Facebook's localStorage isn't ours to keep things in, so the app stores the state (see SIDEBAR_STATE_MESSAGE_PREFIX).
+    function saveState() {
+      console.debug('${SIDEBAR_STATE_MESSAGE_PREFIX}' + JSON.stringify(state));
+    }
+    function clampWidth(width) {
+      return Math.round(Math.max(MIN_WIDTH, Math.min(width, window.innerWidth * MAX_FRACTION)));
+    }
+    function findColumn() {
+      var innerW = window.innerWidth;
+      var innerH = window.innerHeight;
+      var links = document.querySelectorAll('a[href*="/messages/t/"], a[href*="/messages/e2ee/t/"]');
+      var i;
+      var node;
+      var parent;
+      var r;
+      for (i = 0; i < links.length; i++) {
+        node = links.item(i);
+        r = node.getBoundingClientRect();
+        if (r.width === 0 || r.left > innerW * 0.4) continue;
+        while ((parent = node.parentElement) && parent !== document.body) {
+          if (parent.getBoundingClientRect().width > node.getBoundingClientRect().width + 100) break;
+          node = parent;
+        }
+        r = node.getBoundingClientRect();
+        if (r.width < innerW * 0.7 && r.left < innerW * 0.3 && r.height > innerH * 0.4) return node;
+      }
+      return null;
+    }
+    // Wrappers inside the column can carry the same fixed width; they need to follow the column's.
+    function markFillDescendants() {
+      if (!column || !naturalWidth) return;
+      var level = [column];
+      var depth;
+      var next;
+      var i;
+      var j;
+      var child;
+      for (depth = 0; depth < 6 && level.length; depth++) {
+        next = [];
+        for (i = 0; i < level.length; i++) {
+          for (j = 0; j < level[i].children.length; j++) {
+            child = level[i].children[j];
+            if (Math.abs(child.getBoundingClientRect().width - naturalWidth) < 1) child.setAttribute(FILL, '');
+            next.push(child);
+          }
+        }
+        level = next;
+      }
+    }
+    var style = document.createElement('style');
+    style.textContent = [
+      'html.' + SIZED + ' [' + MARK + '] { width: var(--own-messenger-sidebar-width) !important;',
+      '  min-width: var(--own-messenger-sidebar-width) !important; max-width: var(--own-messenger-sidebar-width) !important;',
+      '  flex: 0 0 var(--own-messenger-sidebar-width) !important; }',
+      'html.' + SIZED + ' [' + FILL + '] { box-sizing: border-box !important; width: 100% !important; min-width: 0 !important;',
+      '  max-width: none !important; }',
+      'html.' + HIDDEN + ' [' + MARK + '] { display: none !important; }',
+      'html.' + RESIZING + ', html.' + RESIZING + ' * { cursor: col-resize !important; user-select: none !important; }',
+      '#own-messenger-sidebar-handle { position: fixed; z-index: 2147483647; width: 8px; cursor: col-resize; display: none; }',
+      '#own-messenger-sidebar-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;',
+      '  background: #0866ff; opacity: 0; transition: opacity 0.15s; }',
+      '#own-messenger-sidebar-handle:hover::after, html.' + RESIZING + ' #own-messenger-sidebar-handle::after { opacity: 1; transition-delay: 0.1s; }',
+    ].join('\\n');
+    var handle = document.createElement('div');
+    handle.id = 'own-messenger-sidebar-handle';
+    handle.title = 'Drag to resize, double-click to reset';
+    function apply() {
+      var root = document.documentElement;
+      if (!style.isConnected) (document.head || root).appendChild(style);
+      if (!handle.isConnected && document.body) document.body.appendChild(handle);
+      root.classList.toggle(HIDDEN, state.hidden);
+      root.classList.toggle(SIZED, state.width > 0);
+      if (state.width > 0) root.style.setProperty('--own-messenger-sidebar-width', clampWidth(state.width) + 'px');
+      var r = column && !state.hidden ? column.getBoundingClientRect() : null;
+      if (!r || r.width === 0) {
+        handle.style.display = 'none';
+        return;
+      }
+      handle.style.display = 'block';
+      handle.style.left = r.right - 4 + 'px';
+      handle.style.top = r.top + 'px';
+      handle.style.height = r.height + 'px';
+    }
+    function sync() {
+      if (!column || !column.isConnected) {
+        if (column) column.removeAttribute(MARK);
+        column = findColumn();
+        if (column) {
+          naturalWidth = column.getBoundingClientRect().width;
+          column.setAttribute(MARK, '');
+        }
+      }
+      markFillDescendants();
+      apply();
+    }
+    function setHidden(hidden) {
+      state.hidden = hidden;
+      saveState();
+      sync();
+    }
+    window.__ownMessengerToggleSidebar = function () {
+      setHidden(!state.hidden);
+    };
+    window.__ownMessengerShowSidebar = function () {
+      if (state.hidden) setHidden(false);
+    };
+    handle.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 || !column) return;
+      event.preventDefault();
+      var left = column.getBoundingClientRect().left;
+      handle.setPointerCapture(event.pointerId);
+      document.documentElement.classList.add(RESIZING);
+      function move(moveEvent) {
+        state.width = clampWidth(moveEvent.clientX - left);
+        apply();
+      }
+      function end() {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', end);
+        handle.removeEventListener('pointercancel', end);
+        handle.removeEventListener('lostpointercapture', end);
+        document.documentElement.classList.remove(RESIZING);
+        saveState();
+        window.dispatchEvent(new Event('resize'));
+      }
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', end);
+      handle.addEventListener('pointercancel', end);
+      handle.addEventListener('lostpointercapture', end);
+    });
+    handle.addEventListener('dblclick', function () {
+      state.width = 0;
+      saveState();
+      apply();
+    });
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        var key = event.key.toLowerCase();
+        if (key !== 'b' && key !== 's') return;
+        var isMacLike = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+        if (isMacLike) {
+          if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return;
+        } else {
+          if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        }
+        if (event.isComposing) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!event.repeat) window.__ownMessengerToggleSidebar();
+      },
+      true
+    );
+    window.addEventListener('resize', apply);
+    window.setInterval(sync, 500);
+    sync();
+  })();
+`;
+
+type SidebarState = { width: number; hidden: boolean };
+
+function sidebarStatePath(): string {
+  return path.join(app.getPath('userData'), 'sidebar.json');
+}
+
+function loadSidebarState(): SidebarState {
+  try {
+    const saved = JSON.parse(fs.readFileSync(sidebarStatePath(), 'utf8'));
+    return { width: typeof saved.width === 'number' ? saved.width : 0, hidden: saved.hidden === true };
+  } catch {
+    return { width: 0, hidden: false };
+  }
+}
+
+function saveSidebarStateFromGuest(message: string): void {
+  if (!message.startsWith(SIDEBAR_STATE_MESSAGE_PREFIX)) return;
+  try {
+    const reported = JSON.parse(message.slice(SIDEBAR_STATE_MESSAGE_PREFIX.length));
+    if (typeof reported.width !== 'number' || typeof reported.hidden !== 'boolean') return;
+    const state: SidebarState = { width: Math.max(0, Math.round(reported.width)), hidden: reported.hidden };
+    fs.writeFileSync(sidebarStatePath(), JSON.stringify(state));
+  } catch (error) {
+    console.error('Could not save the sidebar state', error);
+  }
+}
+
+function installMessengerSidebarScript(): string {
+  return `window.__ownMessengerSidebarSavedState = ${JSON.stringify(loadSidebarState())};\n` + INSTALL_MESSENGER_SIDEBAR_SCRIPT;
+}
+
 function redirectCmdKFromShellToMessenger(
   event: Electron.Event,
   messengerContents: Electron.WebContents,
@@ -493,6 +718,11 @@ function redirectCmdIFromShellToMessenger(
   event.preventDefault();
   messengerContents.focus();
   void messengerContents.executeJavaScript(FOCUS_MESSENGER_COMPOSER_SCRIPT, true).catch(() => undefined);
+}
+
+function toggleMessengerSidebar(messengerContents: Electron.WebContents): void {
+  const script = installMessengerSidebarScript() + '\nvoid window.__ownMessengerToggleSidebar();';
+  void messengerContents.executeJavaScript(script, true).catch(() => undefined);
 }
 
 function redirectAltChatNavFromShellToMessenger(
@@ -530,6 +760,11 @@ function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Inpu
   }
   if (isFocusComposerAccelerator(input)) {
     redirectCmdIFromShellToMessenger(event, messengerContents);
+    return;
+  }
+  if (isToggleSidebarAccelerator(input)) {
+    event.preventDefault();
+    toggleMessengerSidebar(messengerContents);
     return;
   }
   if (isCmdChatIndexAccelerator(input)) {
@@ -634,10 +869,13 @@ function createWindow(): void {
 
     const installHotkeyIntoGuest = (): void => {
       void webContents.executeJavaScript(INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT, true).catch(() => undefined);
+      void webContents.executeJavaScript(installMessengerSidebarScript(), true).catch(() => undefined);
     };
     messengerGuestDomReadyCleanup = { wc: webContents, fn: installHotkeyIntoGuest };
     webContents.removeListener('dom-ready', installHotkeyIntoGuest);
     webContents.on('dom-ready', installHotkeyIntoGuest);
+
+    webContents.on('console-message', (event) => saveSidebarStateFromGuest(event.message));
 
     webContents.on('context-menu', (_event, params) => {
       showGuestContextMenu(mainWindow, webContents, params);
@@ -739,6 +977,12 @@ ipcMain.on('copy-to-clipboard', (_, text: string) => {
 
 ipcMain.on('open-external', (_, url: string) => {
   shell.openExternal(url);
+});
+
+ipcMain.on('toggle-sidebar', () => {
+  const messengerContents = messengerShortcutWebContents;
+  if (!messengerContents || messengerContents.isDestroyed()) return;
+  toggleMessengerSidebar(messengerContents);
 });
 
 ipcMain.on('source-selected', (event, sourceId: string) => {
