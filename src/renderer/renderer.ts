@@ -3,20 +3,28 @@ interface ElectronAPI {
   copyToClipboard: (text: string) => void;
   openExternal: (url: string) => void;
   toggleSidebar: () => void;
+  initialSidebarEdge: number;
+  onSidebarEdgeChange: (callback: (edge: number) => void) => void;
   onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
 }
 
 const api = (window as unknown as { electronAPI: ElectronAPI }).electronAPI;
 
 const webview = document.getElementById('messenger') as Electron.WebviewTag;
-const backBtn = document.getElementById('back') as HTMLButtonElement;
-const forwardBtn = document.getElementById('forward') as HTMLButtonElement;
-const refreshBtn = document.getElementById('refresh') as HTMLButtonElement;
 const sidebarBtn = document.getElementById('sidebar') as HTMLButtonElement;
 
 api.onFullScreenChange((isFullScreen) => {
   document.body.classList.toggle('fullscreen', isFullScreen);
 });
+
+function setSidebarEdge(edge: number): void {
+  document.documentElement.style.setProperty('--sidebar-edge', edge + 'px');
+  document.body.classList.toggle('has-sidebar', edge > 0);
+}
+
+// Last launch's edge, so the window opens split instead of once the page has loaded.
+setSidebarEdge(api.initialSidebarEdge);
+api.onSidebarEdgeChange(setSidebarEdge);
 
 function isFacebookURL(url: string): boolean {
   try {
@@ -32,36 +40,8 @@ function isFacebookURL(url: string): boolean {
   }
 }
 
-function updateNavButtons(): void {
-  backBtn.disabled = !webview.canGoBack();
-  forwardBtn.disabled = !webview.canGoForward();
-}
-
-webview.addEventListener('did-navigate', updateNavButtons);
-webview.addEventListener('did-navigate-in-page', updateNavButtons);
-
-backBtn.addEventListener('click', () => {
-  if (webview.canGoBack()) {
-    webview.goBack();
-  }
-});
-
-forwardBtn.addEventListener('click', () => {
-  if (webview.canGoForward()) {
-    webview.goForward();
-  }
-});
-
-refreshBtn.addEventListener('click', () => {
-  webview.reload();
-});
-
 sidebarBtn.addEventListener('click', () => {
   api.toggleSidebar();
-});
-
-webview.addEventListener('dom-ready', () => {
-  updateNavButtons();
 });
 
 webview.addEventListener('new-window', (e) => {

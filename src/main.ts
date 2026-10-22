@@ -493,23 +493,35 @@ const FOCUS_MESSENGER_COMPOSER_SCRIPT =
   INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT + '\nvoid window.__ownMessengerFocusComposer();';
 
 const SIDEBAR_STATE_MESSAGE_PREFIX = '__ownMessengerSidebarState:';
+// The guest reports where the chat list ends so the shell's nav bar can line up with it.
+const SIDEBAR_EDGE_MESSAGE_PREFIX = '__ownMessengerSidebarEdge:';
 
-// Facebook's class names are obfuscated, so the chat list column is found by climbing from a chat link to
-// the widest ancestor that is still narrower than its parent (the row that also holds the open thread).
+// Facebook's class names are obfuscated, so the chat list column is matched by its role next to the thread.
+const SIDEBAR_COLUMN_SELECTOR = '[role="navigation"]:has(~ [role="main"])';
+const THREAD_COLUMN_SELECTOR = '[role="navigation"] ~ [role="main"]';
+
+// The shell's title strip (traffic lights + sidebar button) covers this much of the top of the chat list, or of
+// the thread when the list is hidden; the thread already sits 16px down, inside Facebook's backdrop.
+const TITLEBAR_HEIGHT = 44;
+const THREAD_TOP_MARGIN = 16;
+
+// If that stops matching, the column is found by climbing from a chat link to the widest ancestor that is
+// still narrower than its parent (the row that also holds the open thread).
 const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
   void (function () {
     var NS = '__ownMessengerSidebar';
     if (window[NS]) return;
     window[NS] = true;
+    var COLUMN = '${SIDEBAR_COLUMN_SELECTOR}';
     var MARK = 'data-own-messenger-sidebar';
-    var FILL = 'data-own-messenger-sidebar-fill';
+    var LIVE = 'own-messenger-sidebar-live';
     var SIZED = 'own-messenger-sidebar-sized';
     var HIDDEN = 'own-messenger-sidebar-hidden';
     var RESIZING = 'own-messenger-sidebar-resizing';
     var MIN_WIDTH = 200;
     var MAX_FRACTION = 0.6;
     var column = null;
-    var naturalWidth = 0;
+    var reportedEdge = -1;
     var saved = window.__ownMessengerSidebarSavedState || {};
     var state = { width: saved.width || 0, hidden: saved.hidden === true };
     // Facebook's localStorage isn't ours to keep things in, so the app stores the state (see SIDEBAR_STATE_MESSAGE_PREFIX).
@@ -520,6 +532,8 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       return Math.round(Math.max(MIN_WIDTH, Math.min(width, window.innerWidth * MAX_FRACTION)));
     }
     function findColumn() {
+      var matched = document.querySelector(COLUMN);
+      if (matched) return matched;
       var innerW = window.innerWidth;
       var innerH = window.innerHeight;
       var links = document.querySelectorAll('a[href*="/messages/t/"], a[href*="/messages/e2ee/t/"]');
@@ -540,35 +554,13 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       }
       return null;
     }
-    // Wrappers inside the column can carry the same fixed width; they need to follow the column's.
-    function markFillDescendants() {
-      if (!column || !naturalWidth) return;
-      var level = [column];
-      var depth;
-      var next;
-      var i;
-      var j;
-      var child;
-      for (depth = 0; depth < 6 && level.length; depth++) {
-        next = [];
-        for (i = 0; i < level.length; i++) {
-          for (j = 0; j < level[i].children.length; j++) {
-            child = level[i].children[j];
-            if (Math.abs(child.getBoundingClientRect().width - naturalWidth) < 1) child.setAttribute(FILL, '');
-            next.push(child);
-          }
-        }
-        level = next;
-      }
-    }
     var style = document.createElement('style');
     style.textContent = [
-      'html.' + SIZED + ' [' + MARK + '] { width: var(--own-messenger-sidebar-width) !important;',
+      'html.' + SIZED + ' :is(' + COLUMN + ', [' + MARK + ']) { width: var(--own-messenger-sidebar-width) !important;',
       '  min-width: var(--own-messenger-sidebar-width) !important; max-width: var(--own-messenger-sidebar-width) !important;',
       '  flex: 0 0 var(--own-messenger-sidebar-width) !important; }',
-      'html.' + SIZED + ' [' + FILL + '] { box-sizing: border-box !important; width: 100% !important; min-width: 0 !important;',
-      '  max-width: none !important; }',
-      'html.' + HIDDEN + ' [' + MARK + '] { display: none !important; }',
+      'html.' + HIDDEN + ' :is(' + COLUMN + ', [' + MARK + ']) { display: none !important; }',
+      'html.' + HIDDEN + ' ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }',
       'html.' + RESIZING + ', html.' + RESIZING + ' * { cursor: col-resize !important; user-select: none !important; }',
       '#own-messenger-sidebar-handle { position: fixed; z-index: 2147483647; width: 8px; cursor: col-resize; display: none; }',
       '#own-messenger-sidebar-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;',
@@ -586,6 +578,11 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       root.classList.toggle(SIZED, state.width > 0);
       if (state.width > 0) root.style.setProperty('--own-messenger-sidebar-width', clampWidth(state.width) + 'px');
       var r = column && !state.hidden ? column.getBoundingClientRect() : null;
+      var edge = r && r.width > 0 && r.left < 1 ? Math.round(r.right) : 0;
+      if (edge !== reportedEdge) {
+        reportedEdge = edge;
+        console.debug('${SIDEBAR_EDGE_MESSAGE_PREFIX}' + edge);
+      }
       if (!r || r.width === 0) {
         handle.style.display = 'none';
         return;
@@ -600,11 +597,10 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
         if (column) column.removeAttribute(MARK);
         column = findColumn();
         if (column) {
-          naturalWidth = column.getBoundingClientRect().width;
           column.setAttribute(MARK, '');
+          document.documentElement.classList.add(LIVE);
         }
       }
-      markFillDescendants();
       apply();
     }
     function setHidden(hidden) {
@@ -666,47 +662,120 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       true
     );
     window.addEventListener('resize', apply);
+    // A screen-reader region of Facebook's hangs 1px below the window, so focus changes can still nudge the
+    // (unscrollable) page; keep it pinned.
+    window.addEventListener('scroll', function () {
+      if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+    });
     window.setInterval(sync, 500);
     sync();
   })();
 `;
 
-type SidebarState = { width: number; hidden: boolean };
+type SidebarState = { width: number; hidden: boolean; edge: number };
+
+let sidebarState: SidebarState | null = null;
+let sidebarSaveTimer: NodeJS.Timeout | null = null;
 
 function sidebarStatePath(): string {
   return path.join(app.getPath('userData'), 'sidebar.json');
 }
 
-function loadSidebarState(): SidebarState {
+function getSidebarState(): SidebarState {
+  if (sidebarState) return sidebarState;
+  sidebarState = { width: 0, hidden: false, edge: 0 };
   try {
     const saved = JSON.parse(fs.readFileSync(sidebarStatePath(), 'utf8'));
-    return { width: typeof saved.width === 'number' ? saved.width : 0, hidden: saved.hidden === true };
+    if (typeof saved.width === 'number') sidebarState.width = saved.width;
+    if (typeof saved.edge === 'number') sidebarState.edge = saved.edge;
+    sidebarState.hidden = saved.hidden === true;
   } catch {
-    return { width: 0, hidden: false };
+    // First launch, or an unreadable file: start from Facebook's layout.
   }
+  return sidebarState;
 }
 
-function saveSidebarStateFromGuest(message: string): void {
-  if (!message.startsWith(SIDEBAR_STATE_MESSAGE_PREFIX)) return;
+function writeSidebarState(): void {
+  if (sidebarSaveTimer) clearTimeout(sidebarSaveTimer);
+  sidebarSaveTimer = null;
   try {
-    const reported = JSON.parse(message.slice(SIDEBAR_STATE_MESSAGE_PREFIX.length));
-    if (typeof reported.width !== 'number' || typeof reported.hidden !== 'boolean') return;
-    const state: SidebarState = { width: Math.max(0, Math.round(reported.width)), hidden: reported.hidden };
-    fs.writeFileSync(sidebarStatePath(), JSON.stringify(state));
+    fs.writeFileSync(sidebarStatePath(), JSON.stringify(getSidebarState()));
   } catch (error) {
     console.error('Could not save the sidebar state', error);
   }
 }
 
+// The edge changes on every frame of a drag, so writes are batched.
+function updateSidebarState(update: Partial<SidebarState>): void {
+  Object.assign(getSidebarState(), update);
+  if (sidebarSaveTimer) clearTimeout(sidebarSaveTimer);
+  sidebarSaveTimer = setTimeout(writeSidebarState, 300);
+}
+
+function handleSidebarMessageFromGuest(message: string, shell: Electron.WebContents): void {
+  if (message.startsWith(SIDEBAR_EDGE_MESSAGE_PREFIX)) {
+    const edge = Number(message.slice(SIDEBAR_EDGE_MESSAGE_PREFIX.length));
+    if (!Number.isFinite(edge)) return;
+    updateSidebarState({ edge });
+    shell.send('sidebar-edge-changed', edge);
+    return;
+  }
+  if (!message.startsWith(SIDEBAR_STATE_MESSAGE_PREFIX)) return;
+  try {
+    const reported = JSON.parse(message.slice(SIDEBAR_STATE_MESSAGE_PREFIX.length));
+    if (typeof reported.width !== 'number' || typeof reported.hidden !== 'boolean') return;
+    updateSidebarState({ width: Math.max(0, Math.round(reported.width)), hidden: reported.hidden });
+  } catch {
+    // Not one of ours.
+  }
+}
+
 function installMessengerSidebarScript(): string {
-  return `window.__ownMessengerSidebarSavedState = ${JSON.stringify(loadSidebarState())};\n` + INSTALL_MESSENGER_SIDEBAR_SCRIPT;
+  const { width, hidden } = getSidebarState();
+  return `window.__ownMessengerSidebarSavedState = ${JSON.stringify({ width, hidden })};\n` + INSTALL_MESSENGER_SIDEBAR_SCRIPT;
 }
 
 // The guest is a messenger-only window, so Facebook's own site header goes; its layout is sized off --header-height.
+// Everything scrolls inside Facebook's panes, so the page itself never needs to, and Facebook forces a scrollbar on it.
 const HIDE_FACEBOOK_BANNER_CSS = `
   :root, html, body, .__fb-dark-mode, .__fb-light-mode { --header-height: 0px !important; }
   [role="banner"] { display: none !important; }
+  html { overflow: hidden !important; }
 `;
+
+// Inserted by the guest preload before Facebook paints anything. Until the sidebar script has found the chat
+// list (it adds own-messenger-sidebar-live), the layout comes from the saved state, and the page background
+// shows the split where the list will be, so nothing paints at Facebook's defaults first.
+function guestStartupCss(): string {
+  const { width, hidden, edge } = getSidebarState();
+  const pending = 'html:not(.own-messenger-sidebar-live)';
+  const rules = [
+    HIDE_FACEBOOK_BANNER_CSS,
+    `${SIDEBAR_COLUMN_SELECTOR}, [data-own-messenger-sidebar] {
+      box-sizing: border-box !important; padding-top: ${TITLEBAR_HEIGHT}px !important; }`,
+    // Facebook's divider is drawn by an inner element, which the padding pushes down; continue it to the top.
+    `:is(${SIDEBAR_COLUMN_SELECTOR}, [data-own-messenger-sidebar])::after {
+      content: "" !important; position: absolute !important; top: 0 !important; right: -1px !important;
+      width: 1px !important; height: ${TITLEBAR_HEIGHT}px !important; background: #303233 !important;
+      pointer-events: none !important; }`,
+  ];
+  if (hidden) {
+    rules.push(`${pending} ${SIDEBAR_COLUMN_SELECTOR} { display: none !important; }`);
+    rules.push(`${pending} ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }`);
+    rules.push(`${pending} body { background: #1c1c1d !important; }`);
+    return rules.join('\n');
+  }
+  if (width > 0) {
+    const w = `min(${width}px, 60vw)`;
+    rules.push(`${pending} ${SIDEBAR_COLUMN_SELECTOR} {
+      width: ${w} !important; min-width: ${w} !important; max-width: ${w} !important; flex: 0 0 ${w} !important; }`);
+  }
+  if (edge > 0) {
+    rules.push(`${pending} body { background: linear-gradient(to right,
+      #252728 ${edge}px, #303233 ${edge}px ${edge + 1}px, #1c1c1d ${edge + 1}px) !important; }`);
+  }
+  return rules.join('\n');
+}
 
 function redirectCmdKFromShellToMessenger(
   event: Electron.Event,
@@ -855,7 +924,7 @@ function createWindow(): void {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     // Shown wherever the page hasn't painted yet, like the strip a resize exposes.
-    backgroundColor: '#242526',
+    backgroundColor: '#1c1c1d',
   });
   attachEmptyToolbar(mainWindow);
   mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('full-screen-changed', true));
@@ -864,6 +933,10 @@ function createWindow(): void {
   mainWindow.loadFile(path.join(__dirname, '..', 'src', 'renderer', 'index.html'));
 
   mainWindow.webContents.on('before-input-event', mainShellShortcutDispatcher);
+
+  mainWindow.webContents.on('will-attach-webview', (_event, webPreferences) => {
+    webPreferences.preload = path.join(__dirname, 'guest-preload.js');
+  });
 
   mainWindow.webContents.on('did-attach-webview', (_, webContents) => {
     const previousCleanup = messengerGuestDomReadyCleanup;
@@ -876,13 +949,12 @@ function createWindow(): void {
     const installHotkeyIntoGuest = (): void => {
       void webContents.executeJavaScript(INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT, true).catch(() => undefined);
       void webContents.executeJavaScript(installMessengerSidebarScript(), true).catch(() => undefined);
-      void webContents.insertCSS(HIDE_FACEBOOK_BANNER_CSS).catch(() => undefined);
     };
     messengerGuestDomReadyCleanup = { wc: webContents, fn: installHotkeyIntoGuest };
     webContents.removeListener('dom-ready', installHotkeyIntoGuest);
     webContents.on('dom-ready', installHotkeyIntoGuest);
 
-    webContents.on('console-message', (event) => saveSidebarStateFromGuest(event.message));
+    webContents.on('console-message', (event) => handleSidebarMessageFromGuest(event.message, mainWindow.webContents));
 
     webContents.on('context-menu', (_event, params) => {
       showGuestContextMenu(mainWindow, webContents, params);
@@ -984,6 +1056,18 @@ ipcMain.on('copy-to-clipboard', (_, text: string) => {
 
 ipcMain.on('open-external', (_, url: string) => {
   shell.openExternal(url);
+});
+
+ipcMain.on('guest-startup-css', (event) => {
+  event.returnValue = guestStartupCss();
+});
+
+ipcMain.on('get-sidebar-edge', (event) => {
+  event.returnValue = getSidebarState().edge;
+});
+
+app.on('before-quit', () => {
+  if (sidebarSaveTimer) writeSidebarState();
 });
 
 ipcMain.on('toggle-sidebar', () => {
