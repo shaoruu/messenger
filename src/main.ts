@@ -560,7 +560,6 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       '  min-width: var(--own-messenger-sidebar-width) !important; max-width: var(--own-messenger-sidebar-width) !important;',
       '  flex: 0 0 var(--own-messenger-sidebar-width) !important; }',
       'html.' + HIDDEN + ' :is(' + COLUMN + ', [' + MARK + ']) { display: none !important; }',
-      'html.' + HIDDEN + ' ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }',
       'html.' + RESIZING + ', html.' + RESIZING + ' * { cursor: col-resize !important; user-select: none !important; }',
       '#own-messenger-sidebar-handle { position: fixed; z-index: 2147483647; width: 8px; cursor: col-resize; display: none; }',
       '#own-messenger-sidebar-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;',
@@ -759,14 +758,17 @@ function guestStartupCss(): string {
       width: 1px !important; height: ${TITLEBAR_HEIGHT}px !important; background: #303233 !important;
       pointer-events: none !important; }`,
   ];
-  // See markFlushLoadingThread in guest-preload.ts; the thread is pushed down by the full strip when the list is hidden.
-  const flush = 'html.own-messenger-thread-flush';
-  rules.push(`${flush} ${THREAD_COLUMN_SELECTOR} { padding-top: ${THREAD_TOP_MARGIN}px !important; }`);
-  rules.push(`${flush}.own-messenger-sidebar-hidden ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT}px !important; }`);
+  // With the list hidden the strip spans the window, so the thread moves down by the rest of it. Facebook both
+  // offsets and sizes its panes off --header-height, so set that; padding would push the thread's bottom off-screen.
+  const threadOffset = (html: string) =>
+    `${html}, ${html} :is(body, .__fb-dark-mode, .__fb-light-mode) {
+      --header-height: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }`;
+  rules.push(threadOffset('html.own-messenger-sidebar-hidden'));
+  // See markFlushLoadingThread in guest-preload.ts.
+  rules.push(`html.own-messenger-thread-flush ${THREAD_COLUMN_SELECTOR} { padding-top: ${THREAD_TOP_MARGIN}px !important; }`);
   if (hidden) {
-    rules.push(`${flush}:not(.own-messenger-sidebar-live) ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT}px !important; }`);
+    rules.push(threadOffset(pending));
     rules.push(`${pending} ${SIDEBAR_COLUMN_SELECTOR} { display: none !important; }`);
-    rules.push(`${pending} ${THREAD_COLUMN_SELECTOR} { padding-top: ${TITLEBAR_HEIGHT - THREAD_TOP_MARGIN}px !important; }`);
     rules.push(`${pending} body { background: #1c1c1d !important; }`);
     return rules.join('\n');
   }
