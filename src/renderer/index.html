@@ -57,6 +57,9 @@
       height: 44px;
       display: flex;
       align-items: center;
+      /* The traffic lights are 14px tall at y 16 (trafficLightPosition in main.ts), so centered at 23px rather
+         than the bar's 22px; this lines the button up with them. */
+      padding-top: 2px;
       padding-left: 80px;
       background: var(--thread-backdrop);
       -webkit-app-region: drag;
