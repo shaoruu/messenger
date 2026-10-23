@@ -39,6 +39,14 @@ function isToggleSidebarAccelerator(input: Electron.Input): boolean {
   return key === 'b' || key === 's';
 }
 
+function isChatHistoryAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isComposing) return false;
+  if (!(input.meta || input.control)) return false;
+  if (input.alt || input.shift) return false;
+  return input.key === '[' || input.key === ']';
+}
+
 function isPlainEscape(input: Electron.Input): boolean {
   if (input.type !== 'keyDown') return false;
   if (input.isAutoRepeat || input.isComposing) return false;
@@ -373,6 +381,28 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
       activateChatRowAndRefocusComposer(rows[index]);
       return true;
     }
+    // The nearest history entry in that direction that's a different chat; Facebook pushes one per chat opened.
+    function chatHistoryTarget(delta) {
+      var nav = window.navigation;
+      if (!nav || !nav.currentEntry) return null;
+      var entries = nav.entries();
+      var currentMarker = currentThreadMarkerFromLocation();
+      var i;
+      var marker;
+      for (i = nav.currentEntry.index + delta; i >= 0 && i < entries.length; i += delta) {
+        marker = entries[i].url ? threadMarkerFromPath(new URL(entries[i].url).pathname) : '';
+        if (marker && marker !== currentMarker) return { key: entries[i].key, marker: marker };
+      }
+      return null;
+    }
+    window.__ownMessengerGoChatHistory = function (delta) {
+      var target = chatHistoryTarget(delta);
+      if (!target) return false;
+      focusComposerAfterNavigation(target.marker, function () {
+        window.navigation.traverseTo(target.key);
+      });
+      return true;
+    };
     window.__ownMessengerNavigateChatsByDelta = function (delta) {
       return navigateChatsByAltArrow(delta);
     };
@@ -508,6 +538,20 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
         if (!window.__ownMessengerNavigateChatsByIndex(Number(event.key) - 1)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
+      },
+      true
+    );
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.isComposing || event.altKey || event.shiftKey) return;
+        if (event.key !== '[' && event.key !== ']') return;
+        if (!event.metaKey && !event.ctrlKey) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!event.repeat && typeof window.__ownMessengerGoChatHistory === 'function') {
+          window.__ownMessengerGoChatHistory(event.key === '[' ? -1 : 1);
+        }
       },
       true
     );
@@ -887,6 +931,19 @@ function redirectCmdChatIndexFromShellToMessenger(
   void messengerContents.executeJavaScript(script, true).catch(() => undefined);
 }
 
+function redirectChatHistoryFromShellToMessenger(
+  event: Electron.Event,
+  messengerContents: Electron.WebContents,
+  delta: number,
+): void {
+  event.preventDefault();
+  messengerContents.focus();
+  const script =
+    INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT +
+    `\nvoid (typeof window.__ownMessengerGoChatHistory==="function"?window.__ownMessengerGoChatHistory(${delta}):0);`;
+  void messengerContents.executeJavaScript(script, true).catch(() => undefined);
+}
+
 function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Input): void {
   const messengerContents = messengerShortcutWebContents;
   if (!messengerContents || messengerContents.isDestroyed()) return;
@@ -901,6 +958,14 @@ function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Inpu
   if (isToggleSidebarAccelerator(input)) {
     event.preventDefault();
     toggleMessengerSidebar(messengerContents);
+    return;
+  }
+  if (isChatHistoryAccelerator(input)) {
+    if (input.isAutoRepeat) {
+      event.preventDefault();
+      return;
+    }
+    redirectChatHistoryFromShellToMessenger(event, messengerContents, input.key === '[' ? -1 : 1);
     return;
   }
   if (isPlainEscape(input)) {
