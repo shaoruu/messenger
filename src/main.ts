@@ -844,6 +844,8 @@ const HIDE_FACEBOOK_BANNER_CSS = `
 `;
 
 // Facebook leaves its panes on the default scrollbar, a full-width track; draw a thin pill on nothing instead.
+// A chat theme's gradient sits under the whole thread, masked down to the bubbles, so a see-through gutter shows it
+// as a full-height stripe; the thread's gutter gets the thread's own color.
 const SCROLLBAR_CSS = `
   ::-webkit-scrollbar { width: 10px !important; height: 10px !important; background: transparent !important; }
   ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent !important; }
@@ -851,6 +853,7 @@ const SCROLLBAR_CSS = `
     background: var(--scroll-thumb, rgba(255, 255, 255, 0.3)) padding-box !important;
     border: 2px solid transparent !important; border-radius: 5px !important; min-height: 32px !important; }
   ::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.45) !important; }
+  ${THREAD_COLUMN_SELECTOR} ::-webkit-scrollbar { background: var(--messenger-card-background, #242526) !important; }
 `;
 
 // Inserted by the guest preload before Facebook paints anything. Until the sidebar script has found the chat
