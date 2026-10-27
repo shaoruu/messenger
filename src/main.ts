@@ -1,9 +1,20 @@
-import { app, BrowserWindow, session, ipcMain, shell, clipboard, Menu, desktopCapturer } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  session,
+  ipcMain,
+  shell,
+  clipboard,
+  Menu,
+  desktopCapturer,
+  webContents as electronWebContents,
+} from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 
 type DisplayMediaCallback = (streams: { video?: Electron.Video }) => void;
-let pendingDisplayMediaCallback: DisplayMediaCallback | null = null;
+// Each open screen share picker's answer to the call that asked, consumed by whichever of pick/cancel/close comes first.
+const pickerCallbacks = new Map<number, DisplayMediaCallback>();
 
 let messengerShortcutWebContents: Electron.WebContents | null = null;
 
@@ -982,11 +993,15 @@ function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Inpu
   }
 }
 
-function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.DesktopCapturerSource[]): BrowserWindow {
+function createPickerWindow(
+  parentWindow: BrowserWindow,
+  sources: Electron.DesktopCapturerSource[],
+  callback: DisplayMediaCallback,
+): BrowserWindow {
   const pickerWindow = new BrowserWindow({
     width: 800,
     height: 600,
-    parent: mainWindow,
+    parent: parentWindow,
     modal: true,
     show: false,
     frame: false,
@@ -998,7 +1013,8 @@ function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.Desktop
     },
   });
 
-  pickerWindow.loadFile(path.join(__dirname, '..', 'src', 'picker', 'picker.html'));
+  const pickerContentsId = pickerWindow.webContents.id;
+  pickerCallbacks.set(pickerContentsId, callback);
 
   pickerWindow.webContents.on('did-finish-load', () => {
     const sourcesData = sources.map((source) => ({
@@ -1009,8 +1025,21 @@ function createPickerWindow(mainWindow: BrowserWindow, sources: Electron.Desktop
     pickerWindow.webContents.send('sources', sourcesData);
     pickerWindow.show();
   });
+  // Closing the picker any other way than picking a source cancels the share, so the call isn't left waiting.
+  pickerWindow.on('closed', () => resolvePicker(pickerContentsId, {}));
+
+  pickerWindow.loadFile(path.join(__dirname, '..', 'src', 'picker', 'picker.html')).catch((error) => {
+    console.error('Could not load the screen share picker', error);
+    if (!pickerWindow.isDestroyed()) pickerWindow.close();
+  });
 
   return pickerWindow;
+}
+
+function resolvePicker(pickerContentsId: number, streams: Parameters<DisplayMediaCallback>[0]): void {
+  const callback = pickerCallbacks.get(pickerContentsId);
+  pickerCallbacks.delete(pickerContentsId);
+  callback?.(streams);
 }
 
 // macOS Tahoe only draws the larger corner radius native apps have on windows with a
@@ -1105,16 +1134,24 @@ function createWindow(): void {
       return { action: 'deny' };
     });
 
-    webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
-      desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } }).then((sources) => {
-        if (sources.length === 0) {
-          callback({});
-          return;
-        }
+    webContents.session.setDisplayMediaRequestHandler((request, callback) => {
+      // Calls run in their own popup window, so put the picker over whichever window asked.
+      const requester = request.frame ? electronWebContents.fromFrame(request.frame) : undefined;
+      const parentWindow = (requester && BrowserWindow.fromWebContents(requester)) || mainWindow;
+      desktopCapturer
+        .getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } })
+        .then((sources) => {
+          if (sources.length === 0) {
+            callback({});
+            return;
+          }
 
-        pendingDisplayMediaCallback = callback;
-        createPickerWindow(mainWindow, sources);
-      });
+          createPickerWindow(parentWindow, sources, callback);
+        })
+        .catch((error) => {
+          console.error('Could not list screen share sources', error);
+          callback({});
+        });
     });
   });
 }
@@ -1210,25 +1247,10 @@ ipcMain.on('toggle-sidebar', () => {
 });
 
 ipcMain.on('source-selected', (event, sourceId: string) => {
-  const pickerWindow = BrowserWindow.fromWebContents(event.sender);
-  if (pickerWindow) {
-    pickerWindow.close();
-  }
-
-  if (pendingDisplayMediaCallback && sourceId) {
-    pendingDisplayMediaCallback({ video: { id: sourceId, name: sourceId } });
-    pendingDisplayMediaCallback = null;
-  }
+  if (sourceId) resolvePicker(event.sender.id, { video: { id: sourceId, name: sourceId } });
+  BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
 ipcMain.on('picker-cancelled', (event) => {
-  const pickerWindow = BrowserWindow.fromWebContents(event.sender);
-  if (pickerWindow) {
-    pickerWindow.close();
-  }
-
-  if (pendingDisplayMediaCallback) {
-    pendingDisplayMediaCallback({});
-    pendingDisplayMediaCallback = null;
-  }
+  BrowserWindow.fromWebContents(event.sender)?.close();
 });

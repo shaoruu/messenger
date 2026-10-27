@@ -4,12 +4,12 @@ interface PickerAPI {
   cancel: () => void;
 }
 
-const pickerAPI = (window as unknown as { pickerAPI: PickerAPI }).pickerAPI;
+const picker = (window as unknown as { pickerAPI: PickerAPI }).pickerAPI;
 
 const sourcesGrid = document.getElementById('sources-grid') as HTMLDivElement;
 const cancelBtn = document.getElementById('cancel-btn') as HTMLButtonElement;
 
-pickerAPI.onSources((sources) => {
+picker.onSources((sources) => {
   sourcesGrid.replaceChildren();
 
   sources.forEach((source) => {
@@ -30,7 +30,7 @@ pickerAPI.onSources((sources) => {
     item.appendChild(name);
 
     item.addEventListener('click', () => {
-      pickerAPI.selectSource(source.id);
+      picker.selectSource(source.id);
     });
 
     sourcesGrid.appendChild(item);
@@ -38,11 +38,11 @@ pickerAPI.onSources((sources) => {
 });
 
 cancelBtn.addEventListener('click', () => {
-  pickerAPI.cancel();
+  picker.cancel();
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    pickerAPI.cancel();
+    picker.cancel();
   }
 });

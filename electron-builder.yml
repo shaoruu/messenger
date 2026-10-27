@@ -5,6 +5,7 @@ directories:
 files:
   - dist/**/*
   - src/renderer/**/*
+  - src/picker/**/*
 extraResources:
   - from: dist-native/window-chrome.node
     to: window-chrome.node
