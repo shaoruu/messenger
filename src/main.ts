@@ -843,6 +843,16 @@ const HIDE_FACEBOOK_BANNER_CSS = `
   html { overflow: hidden !important; }
 `;
 
+// Facebook leaves its panes on the default scrollbar, a full-width track; draw a thin pill on nothing instead.
+const SCROLLBAR_CSS = `
+  ::-webkit-scrollbar { width: 10px !important; height: 10px !important; background: transparent !important; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent !important; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb, rgba(255, 255, 255, 0.3)) padding-box !important;
+    border: 2px solid transparent !important; border-radius: 5px !important; min-height: 32px !important; }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.45) !important; }
+`;
+
 // Inserted by the guest preload before Facebook paints anything. Until the sidebar script has found the chat
 // list (it adds own-messenger-sidebar-live), the layout comes from the saved state, and the page background
 // shows the split where the list will be, so nothing paints at Facebook's defaults first.
@@ -851,6 +861,7 @@ function guestStartupCss(): string {
   const pending = 'html:not(.own-messenger-sidebar-live)';
   const rules = [
     HIDE_FACEBOOK_BANNER_CSS,
+    SCROLLBAR_CSS,
     `${SIDEBAR_COLUMN_SELECTOR}, [data-own-messenger-sidebar] {
       box-sizing: border-box !important; padding-top: ${TITLEBAR_HEIGHT}px !important; }`,
     // Facebook's divider is drawn by an inner element, which the padding pushes down; continue it to the top.
