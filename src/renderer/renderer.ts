@@ -5,6 +5,7 @@ interface ElectronAPI {
   toggleSidebar: () => void;
   initialSidebarEdge: number;
   onSidebarEdgeChange: (callback: (edge: number) => void) => void;
+  onGuestOverlayChange: (callback: (overlaid: boolean) => void) => void;
   onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
 }
 
@@ -15,6 +16,11 @@ const sidebarBtn = document.getElementById('sidebar') as HTMLButtonElement;
 
 api.onFullScreenChange((isFullScreen) => {
   document.body.classList.toggle('fullscreen', isFullScreen);
+});
+
+// Facebook's photo viewer fills the window, so the bar would only cut into its corner.
+api.onGuestOverlayChange((overlaid) => {
+  document.body.classList.toggle('guest-overlay', overlaid);
 });
 
 function setSidebarEdge(edge: number): void {

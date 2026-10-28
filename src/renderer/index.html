@@ -89,6 +89,15 @@
       left: calc(var(--sidebar-edge) + 4px);
     }
 
+    /* Something of the page's, like the photo viewer, covers the window; the strip still lets it be dragged. */
+    body.guest-overlay #titlebar {
+      display: none;
+    }
+
+    body.guest-overlay #drag-strip {
+      left: 0;
+    }
+
     .titlebar-btn {
       -webkit-app-region: no-drag;
       width: 28px;

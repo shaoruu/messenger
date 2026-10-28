@@ -578,6 +578,8 @@ const FOCUS_MESSENGER_COMPOSER_SCRIPT =
 const SIDEBAR_STATE_MESSAGE_PREFIX = '__ownMessengerSidebarState:';
 // The guest reports where the chat list ends so the shell's nav bar can line up with it.
 const SIDEBAR_EDGE_MESSAGE_PREFIX = '__ownMessengerSidebarEdge:';
+// ...and whether something it lays over the page, like the photo viewer, covers the corner under that bar.
+const GUEST_OVERLAY_MESSAGE_PREFIX = '__ownMessengerGuestOverlay:';
 
 // Facebook's class names are obfuscated, so the chat list column is matched by its role next to the thread.
 const SIDEBAR_COLUMN_SELECTOR = '[role="navigation"]:has(~ [role="main"])';
@@ -596,6 +598,7 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
     if (window[NS]) return;
     window[NS] = true;
     var COLUMN = '${SIDEBAR_COLUMN_SELECTOR}';
+    var THREAD = '${THREAD_COLUMN_SELECTOR}';
     var MARK = 'data-own-messenger-sidebar';
     var LIVE = 'own-messenger-sidebar-live';
     var SIZED = 'own-messenger-sidebar-sized';
@@ -605,6 +608,8 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
     var MAX_FRACTION = 0.6;
     var column = null;
     var reportedEdge = -1;
+    var reportedOverlay = null;
+    var overlayFrame = 0;
     var saved = window.__ownMessengerSidebarSavedState || {};
     var state = { width: saved.width || 0, hidden: saved.hidden === true };
     // Facebook's localStorage isn't ours to keep things in, so the app stores the state (see SIDEBAR_STATE_MESSAGE_PREFIX).
@@ -652,6 +657,20 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
     var handle = document.createElement('div');
     handle.id = 'own-messenger-sidebar-handle';
     handle.title = 'Drag to resize, double-click to reset';
+    // The photo viewer is an ordinary layer of the page rather than a dialog, so it's found by what's on top at a
+    // point under the shell's title bar: normally the chat list, or the backdrop around the thread when it's hidden.
+    function isOverlaid() {
+      var anchor = column && !state.hidden ? column : document.querySelector(THREAD);
+      var hit = document.elementFromPoint(20, 20);
+      return !!anchor && !!hit && !anchor.contains(hit) && !hit.contains(anchor);
+    }
+    function reportOverlay() {
+      overlayFrame = 0;
+      var overlaid = isOverlaid();
+      if (overlaid === reportedOverlay) return;
+      reportedOverlay = overlaid;
+      console.debug('${GUEST_OVERLAY_MESSAGE_PREFIX}' + (overlaid ? 1 : 0));
+    }
     function apply() {
       var root = document.documentElement;
       if (!style.isConnected) (document.head || root).appendChild(style);
@@ -665,6 +684,7 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
         reportedEdge = edge;
         console.debug('${SIDEBAR_EDGE_MESSAGE_PREFIX}' + edge);
       }
+      reportOverlay();
       if (!r || r.width === 0) {
         handle.style.display = 'none';
         return;
@@ -749,7 +769,7 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       for (var i = 0; i < popups.length; i++) {
         if (popups[i].getBoundingClientRect().width > 0) return true;
       }
-      return false;
+      return isOverlaid();
     }
     window.addEventListener(
       'keydown',
@@ -762,6 +782,10 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       true
     );
     window.addEventListener('resize', apply);
+    // The viewer opens and closes without a resize; a check a frame after the page changes keeps the bar in step.
+    new MutationObserver(function () {
+      if (!overlayFrame) overlayFrame = requestAnimationFrame(reportOverlay);
+    }).observe(document.documentElement, { childList: true, subtree: true });
     // A screen-reader region of Facebook's hangs 1px below the window, so focus changes can still nudge the
     // (unscrollable) page; keep it pinned.
     window.addEventListener('scroll', function () {
@@ -818,6 +842,10 @@ function handleSidebarMessageFromGuest(message: string, shell: Electron.WebConte
     if (!Number.isFinite(edge)) return;
     updateSidebarState({ edge });
     shell.send('sidebar-edge-changed', edge);
+    return;
+  }
+  if (message.startsWith(GUEST_OVERLAY_MESSAGE_PREFIX)) {
+    shell.send('guest-overlay-changed', message.slice(GUEST_OVERLAY_MESSAGE_PREFIX.length) === '1');
     return;
   }
   if (!message.startsWith(SIDEBAR_STATE_MESSAGE_PREFIX)) return;

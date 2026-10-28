@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   initialSidebarEdge: ipcRenderer.sendSync('get-sidebar-edge') as number,
   onSidebarEdgeChange: (callback: (edge: number) => void) =>
     ipcRenderer.on('sidebar-edge-changed', (_, edge: number) => callback(edge)),
+  onGuestOverlayChange: (callback: (overlaid: boolean) => void) =>
+    ipcRenderer.on('guest-overlay-changed', (_, overlaid: boolean) => callback(overlaid)),
   onFullScreenChange: (callback: (isFullScreen: boolean) => void) =>
     ipcRenderer.on('full-screen-changed', (_, isFullScreen: boolean) => callback(isFullScreen)),
 });
