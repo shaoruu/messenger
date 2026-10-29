@@ -50,6 +50,15 @@ function isToggleSidebarAccelerator(input: Electron.Input): boolean {
   return key === 'b' || key === 's';
 }
 
+// Option turns B into ∫ on macOS, so this one matches the physical key.
+function isToggleConversationInfoAccelerator(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false;
+  if (input.isAutoRepeat || input.isComposing) return false;
+  if (!(input.meta || input.control)) return false;
+  if (!input.alt || input.shift) return false;
+  return input.code === 'KeyB';
+}
+
 function isChatHistoryAccelerator(input: Electron.Input): boolean {
   if (input.type !== 'keyDown') return false;
   if (input.isComposing) return false;
@@ -432,6 +441,13 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
     window.__ownMessengerFocusComposer = function () {
       focusComposerAfterNavigation('', null);
     };
+    // The thread header's info button opens and closes the panel on the right.
+    window.__ownMessengerToggleConversationInfo = function () {
+      var button = document.querySelector('[role="main"] [role="button"][aria-label="Conversation information"]');
+      if (!(button instanceof HTMLElement)) return false;
+      button.click();
+      return true;
+    };
     if (window[NS]) return;
     window[NS] = true;
     window.addEventListener(
@@ -452,6 +468,22 @@ const INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT = `
         action();
         event.preventDefault();
         event.stopImmediatePropagation();
+      },
+      true
+    );
+    window.addEventListener(
+      'keydown',
+      function (event) {
+        if (event.code !== 'KeyB' || !event.altKey || event.shiftKey || event.isComposing) return;
+        var isMacLike = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+        if (isMacLike) {
+          if (!event.metaKey || event.ctrlKey) return;
+        } else {
+          if (!event.ctrlKey || event.metaKey) return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!event.repeat) window.__ownMessengerToggleConversationInfo();
       },
       true
     );
@@ -1020,6 +1052,13 @@ function mainShellShortcutDispatcher(event: Electron.Event, input: Electron.Inpu
   if (isToggleSidebarAccelerator(input)) {
     event.preventDefault();
     toggleMessengerSidebar(messengerContents);
+    return;
+  }
+  if (isToggleConversationInfoAccelerator(input)) {
+    event.preventDefault();
+    const script =
+      INSTALL_MESSENGER_INBOX_SEARCH_HOTKEY_SCRIPT + '\nvoid window.__ownMessengerToggleConversationInfo();';
+    void messengerContents.executeJavaScript(script, true).catch(() => undefined);
     return;
   }
   if (isChatHistoryAccelerator(input)) {
