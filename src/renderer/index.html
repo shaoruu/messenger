@@ -18,6 +18,7 @@
       --sidebar-divider: #303233;
       --thread-backdrop: #1c1c1d;
       --sidebar-edge: 0px;
+      --guest-zoom: 1;
     }
 
     html, body {
@@ -46,27 +47,28 @@
     }
 
     /* Sits over the top of the chat list, which the guest pushes down by the same 44px (TITLEBAR_HEIGHT in
-       main.ts); with the list hidden it spans the window and the thread is pushed down instead. It stops short
-       of the list's edge so the guest's resize handle (8px, centered on the edge) is reachable full height. */
+       main.ts, scaled by the guest's zoom); with the list hidden it spans the window and the thread is pushed down
+       instead. It stops short of the list's edge so the guest's resize handle (8px, centered on the edge) is
+       reachable full height. */
     #titlebar {
       position: absolute;
       top: 0;
       left: 0;
       z-index: 1;
       width: 100%;
-      height: 44px;
+      height: calc(44px * var(--guest-zoom));
       display: flex;
-      align-items: center;
-      /* The traffic lights are 14px tall at y 16 (trafficLightPosition in main.ts), so centered at 23px rather
-         than the bar's 22px; this lines the button up with them. */
-      padding-top: 2px;
+      align-items: flex-start;
+      /* The traffic lights are 14px tall at y 16 (trafficLightPosition in main.ts) and don't zoom, so the 28px
+         button is pinned to their center at 23px rather than the bar's. */
+      padding-top: 9px;
       padding-left: 80px;
       background: var(--thread-backdrop);
       -webkit-app-region: drag;
     }
 
     body.has-sidebar #titlebar {
-      width: calc(var(--sidebar-edge) - 4px);
+      width: calc(var(--sidebar-edge) - 4px * var(--guest-zoom));
       background: var(--sidebar-color);
     }
 
@@ -81,12 +83,12 @@
       top: 0;
       left: 0;
       right: 0;
-      height: 12px;
+      height: calc(12px * var(--guest-zoom));
       -webkit-app-region: drag;
     }
 
     body.has-sidebar #drag-strip {
-      left: calc(var(--sidebar-edge) + 4px);
+      left: calc(var(--sidebar-edge) + 4px * var(--guest-zoom));
     }
 
     /* Something of the page's, like the photo viewer, covers the window; the strip still lets it be dragged. */

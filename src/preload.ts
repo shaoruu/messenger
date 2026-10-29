@@ -6,8 +6,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   toggleSidebar: () => ipcRenderer.send('toggle-sidebar'),
   initialSidebarEdge: ipcRenderer.sendSync('get-sidebar-edge') as number,
-  onSidebarEdgeChange: (callback: (edge: number) => void) =>
-    ipcRenderer.on('sidebar-edge-changed', (_, edge: number) => callback(edge)),
+  onSidebarEdgeChange: (callback: (edge: number, zoom: number) => void) =>
+    ipcRenderer.on('sidebar-edge-changed', (_, edge: number, zoom: number) => callback(edge, zoom)),
   onGuestOverlayChange: (callback: (overlaid: boolean) => void) =>
     ipcRenderer.on('guest-overlay-changed', (_, overlaid: boolean) => callback(overlaid)),
   onFullScreenChange: (callback: (isFullScreen: boolean) => void) =>

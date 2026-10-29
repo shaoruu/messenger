@@ -607,7 +607,7 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
     var MIN_WIDTH = 200;
     var MAX_FRACTION = 0.6;
     var column = null;
-    var reportedEdge = -1;
+    var reportedEdge = '';
     var reportedOverlay = null;
     var overlayFrame = 0;
     var saved = window.__ownMessengerSidebarSavedState || {};
@@ -680,8 +680,9 @@ const INSTALL_MESSENGER_SIDEBAR_SCRIPT = `
       if (state.width > 0) root.style.setProperty('--own-messenger-sidebar-width', clampWidth(state.width) + 'px');
       var r = column && !state.hidden ? column.getBoundingClientRect() : null;
       var edge = r && r.width > 0 && r.left < 1 ? Math.round(r.right) : 0;
-      if (edge !== reportedEdge) {
-        reportedEdge = edge;
+      // Zooming changes devicePixelRatio but not the edge in CSS px, and the shell still has to rescale its bar.
+      if (edge + '@' + window.devicePixelRatio !== reportedEdge) {
+        reportedEdge = edge + '@' + window.devicePixelRatio;
         console.debug('${SIDEBAR_EDGE_MESSAGE_PREFIX}' + edge);
       }
       reportOverlay();
@@ -836,12 +837,17 @@ function updateSidebarState(update: Partial<SidebarState>): void {
   sidebarSaveTimer = setTimeout(writeSidebarState, 300);
 }
 
-function handleSidebarMessageFromGuest(message: string, shell: Electron.WebContents): void {
+function handleSidebarMessageFromGuest(
+  message: string,
+  guest: Electron.WebContents,
+  shell: Electron.WebContents
+): void {
   if (message.startsWith(SIDEBAR_EDGE_MESSAGE_PREFIX)) {
     const edge = Number(message.slice(SIDEBAR_EDGE_MESSAGE_PREFIX.length));
     if (!Number.isFinite(edge)) return;
+    // Saved in the guest's CSS px, which is what the startup CSS needs; the shell isn't zoomed, so it gets both.
     updateSidebarState({ edge });
-    shell.send('sidebar-edge-changed', edge);
+    shell.send('sidebar-edge-changed', edge, guest.getZoomFactor());
     return;
   }
   if (message.startsWith(GUEST_OVERLAY_MESSAGE_PREFIX)) {
@@ -893,8 +899,11 @@ function guestStartupCss(): string {
   const rules = [
     HIDE_FACEBOOK_BANNER_CSS,
     SCROLLBAR_CSS,
+    // The padding shows the column's own background, a shade off the list's and with an inset edge line; the shell's
+    // bar leaves the last few px of it uncovered, so paint it like the list.
     `${SIDEBAR_COLUMN_SELECTOR}, [data-own-messenger-sidebar] {
-      box-sizing: border-box !important; padding-top: ${TITLEBAR_HEIGHT}px !important; }`,
+      box-sizing: border-box !important; padding-top: ${TITLEBAR_HEIGHT}px !important;
+      background-color: #252728 !important; box-shadow: none !important; }`,
     // Facebook's divider is drawn by an inner element, which the padding pushes down; continue it to the top.
     `:is(${SIDEBAR_COLUMN_SELECTOR}, [data-own-messenger-sidebar])::after {
       content: "" !important; position: absolute !important; top: 0 !important; right: -1px !important;
@@ -1155,7 +1164,9 @@ function createWindow(): void {
     webContents.removeListener('dom-ready', installHotkeyIntoGuest);
     webContents.on('dom-ready', installHotkeyIntoGuest);
 
-    webContents.on('console-message', (event) => handleSidebarMessageFromGuest(event.message, mainWindow.webContents));
+    webContents.on('console-message', (event) =>
+      handleSidebarMessageFromGuest(event.message, webContents, mainWindow.webContents)
+    );
 
     webContents.on('context-menu', (_event, params) => {
       showGuestContextMenu(mainWindow, webContents, params);

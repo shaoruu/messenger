@@ -4,7 +4,7 @@ interface ElectronAPI {
   openExternal: (url: string) => void;
   toggleSidebar: () => void;
   initialSidebarEdge: number;
-  onSidebarEdgeChange: (callback: (edge: number) => void) => void;
+  onSidebarEdgeChange: (callback: (edge: number, zoom: number) => void) => void;
   onGuestOverlayChange: (callback: (overlaid: boolean) => void) => void;
   onFullScreenChange: (callback: (isFullScreen: boolean) => void) => void;
 }
@@ -23,8 +23,10 @@ api.onGuestOverlayChange((overlaid) => {
   document.body.classList.toggle('guest-overlay', overlaid);
 });
 
-function setSidebarEdge(edge: number): void {
-  document.documentElement.style.setProperty('--sidebar-edge', edge + 'px');
+// The edge is in the guest's CSS px; ⌘+/⌘- zoom only the guest, so the bar scales with it.
+function setSidebarEdge(edge: number, zoom = 1): void {
+  document.documentElement.style.setProperty('--sidebar-edge', edge * zoom + 'px');
+  document.documentElement.style.setProperty('--guest-zoom', String(zoom));
   document.body.classList.toggle('has-sidebar', edge > 0);
 }
 
